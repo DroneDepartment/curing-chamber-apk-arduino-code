@@ -65,6 +65,21 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
+  // Send the button label to the ESP32 server
+  Future<void> sendButtonPress(String buttonLabel) async {
+    try {
+      final response =
+          await http.get(Uri.parse('$esp32Ip/button?button=$buttonLabel'));
+      if (response.statusCode == 200) {
+        print("Button pressed: $buttonLabel");
+      } else {
+        print("Failed to send button press");
+      }
+    } catch (e) {
+      print("Error sending button press: $e");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -80,7 +95,7 @@ class _MyAppState extends State<MyApp> {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 StatusBulb(
-                    label: "Connected",
+                    label: "Connection",
                     color: isConnected ? Colors.green : Colors.red),
                 StatusBulb(
                     label: "Heater",
@@ -123,6 +138,55 @@ class _MyAppState extends State<MyApp> {
               ),
             ),
             SizedBox(height: 20),
+            // Buttons Section - Updated Layout
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      ButtonCard(
+                        buttonLabel: "Enter",
+                        icon: Icons.keyboard_return,
+                        onPressed: () => sendButtonPress("Enter"),
+                      ),
+                      ButtonCard(
+                        buttonLabel: "Down",
+                        icon: Icons.arrow_downward,
+                        onPressed: () => sendButtonPress("Down"),
+                      ),
+                      ButtonCard(
+                        buttonLabel: "Up",
+                        icon: Icons.arrow_upward,
+                        onPressed: () => sendButtonPress("Up"),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      ButtonCard(
+                        buttonLabel: "Accept",
+                        icon: Icons.check,
+                        onPressed: () => sendButtonPress("Accept"),
+                      ),
+                      ButtonCard(
+                        buttonLabel: "Clear",
+                        icon: Icons.clear,
+                        onPressed: () => sendButtonPress("Clear"),
+                      ),
+                      ButtonCard(
+                        buttonLabel: "Back",
+                        icon: Icons.arrow_back,
+                        onPressed: () => sendButtonPress("Back"),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -143,6 +207,47 @@ class StatusBulb extends StatelessWidget {
         Icon(Icons.lightbulb, size: 40, color: color),
         Text(label, style: TextStyle(fontSize: 16, color: Colors.blue)),
       ],
+    );
+  }
+}
+
+class ButtonCard extends StatelessWidget {
+  final String buttonLabel;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  ButtonCard(
+      {required this.buttonLabel, required this.icon, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Card(
+        elevation: 6,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        color: Colors.green,
+        child: Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(15),
+            color: Colors.green,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 30, color: Colors.white),
+              SizedBox(height: 8),
+              Text(
+                buttonLabel,
+                style: TextStyle(color: Colors.white, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
