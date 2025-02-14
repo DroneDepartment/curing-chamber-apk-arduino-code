@@ -1,0 +1,145 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <WiFi.h>
+#include <WebServer.h>
+
+#define LCD_ADDRESS 0x27
+#define LCD_COLUMNS 16
+#define LCD_ROWS 2
+
+const char* ssid = "DRONE-D";
+const char* password = "43580729";
+
+IPAddress staticIP(192, 168, 1, 117);
+IPAddress gateway(192, 168, 1, 1);
+IPAddress subnet(255, 255, 0, 0);
+
+LiquidCrystal_I2C lcd(LCD_ADDRESS, LCD_COLUMNS, LCD_ROWS);
+WebServer server(80);
+
+// Store the web button value
+int buttonPressed = 0;
+
+// Heater and fan web states (0 = OFF, 1 = ON)
+bool heaterState = false;
+bool fanState = false;
+
+// Store the content of the LCD rows
+String row1 = "";
+String row2 = "";
+
+void setupWiFi() {
+    WiFi.config(staticIP, gateway, subnet);
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+    }
+}
+
+void setupServer() {
+    // Define route for fetching LCD content
+    server.on("/lcd", HTTP_GET, sendLcdContent);  // Call the function to send content
+    // Initialize the server
+    server.on("/button", HTTP_GET, []() {
+        String buttonLabel = server.arg("button");  // Get the button label from the query parameter
+        buttonPressed = read_button_web(buttonLabel);  // Call the function with the button label
+        server.send(200, "text/plain", String(buttonPressed));  // Send back the corresponding button number
+    });
+
+    // Define routes to check heater and fan states
+    server.on("/run_fan", HTTP_GET, []() {
+        String state = server.arg("state");
+        if (state == "check") {
+            String fanStateResponse = fanState ? "Fan is ON" : "Fan is OFF";
+            server.send(200, "text/plain", fanStateResponse);
+        }
+    });
+
+    server.on("/run_heater", HTTP_GET, []() {
+        String state = server.arg("state");
+        if (state == "check") {
+            String heaterStateResponse = heaterState ? "Heater is ON" : "Heater is OFF";
+            server.send(200, "text/plain", heaterStateResponse);
+        }
+    });
+
+    server.begin();
+}
+
+// Function to handle controlling the heater
+void call_heater_web(int state) {
+  heaterState = (state == 1);  // Set heater state (1 for ON, 0 for OFF)
+  Serial.print("Heater state: ");
+  Serial.println(heaterState ? "ON" : "OFF");
+}
+
+// Function to handle controlling the fan
+void call_fan_web(int state) {
+  fanState = (state == 1);  // Set fan state (1 for ON, 0 for OFF)
+  Serial.print("Fan state: ");
+  Serial.println(fanState ? "ON" : "OFF");
+}
+
+// Function to handle button presses and return the corresponding button number
+int read_button_web(String label) {
+    if (label == "Enter") return 1;  // Enter button
+    else if (label == "Down") return 2;  // Down button
+    else if (label == "Up") return 3;  // Up button
+    else if (label == "Accept") return 4;  // Accept button
+    else if (label == "Clear") return 5;  // Clear button
+    else if (label == "Back") return 6;  // Back button
+    else return 0;  // Unknown button
+}
+
+// Function to update the content of both rows
+void updateLCDContent() {
+    lcd.setCursor(0, 0);
+    lcd.print(row1);
+
+    lcd.setCursor(0, 1);
+    lcd.print(row2);
+}
+
+// Function to send the LCD content to the client
+void sendLcdContent() {
+    String lcdContent = row1 + "\n" + row2;
+    server.send(200, "text/plain", lcdContent);  // Send the LCD content as plain text
+}
+
+void setup() {
+    Wire.begin();
+    lcd.init();
+    lcd.backlight();
+
+    setupWiFi();
+    setupServer();
+}
+
+void loop() {
+    server.handleClient();
+    // Just an example to toggle heater and fan states when a button is pressed
+    if (buttonPressed == 1) {
+        row1 = "Heater ON";
+        row2 = "Fan OFF";
+        
+        updateLCDContent();
+        call_heater_web(1);
+        call_fan_web(0);
+    }
+    if (buttonPressed == 2) {
+        row1 = "Heater OFF";
+        row2 = "Fan ON";
+        updateLCDContent();
+        call_heater_web(0);
+        call_fan_web(1);
+        
+    }
+     if (buttonPressed == 3) {
+        row1 = "Heater OFF";
+        row2 = "Fan OFF";
+        updateLCDContent();
+        call_heater_web(0);
+        call_fan_web(0);
+        
+    }
+}
