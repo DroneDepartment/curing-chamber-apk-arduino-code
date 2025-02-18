@@ -31,6 +31,15 @@ class _MyAppState extends State<MyApp> {
         setState(() {
           lcdText = response.body.split("\n");
           if (lcdText.length < 2) lcdText.add("");
+
+          // Replace "DC" with "°C" for numbers in lcdText
+          lcdText[0] = lcdText[0].replaceAllMapped(RegExp(r'(\d+)DC'), (match) {
+            return "${match.group(1)}°C"; // Correctly format the result as "109°C"
+          });
+          lcdText[1] = lcdText[1].replaceAllMapped(RegExp(r'(\d+)DC'), (match) {
+            return "${match.group(1)}°C"; // Same for row2
+          });
+
           isConnected = true;
         });
       } else {
