@@ -1,0 +1,1611 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <EEPROM.h>
+#include <WiFi.h>
+#include <WebServer.h>
+
+#define EEPROM_SIZE 512  // Define EEPROM size
+#define TEMP_ADDR 0      // Start address for tempValue
+#define RISE_ADDR 10     // Start address for riseTime
+#define HOLD_ADDR 20     // Start address for holdTime
+#define FALL_ADDR 30     // Start address for fallTime
+
+const char* ssid = "DRONE-D";
+const char* password = "43580729";
+
+IPAddress staticIP(192, 168, 1, 117);
+IPAddress gateway(192, 168, 1, 1);
+IPAddress subnet(255, 255, 0, 0);
+
+WebServer server(80);
+
+const int heaterPin = 33; // Heater pin
+const int fanPin = 25;
+//unsigned long previousMillis = 0;
+//const int heaterPin = 33; // Heater pin
+unsigned long previousMillis = 0;
+unsigned long lastDisplayUpdate = 0;
+unsigned long lastTargetDisplay = 0;
+
+
+
+#define UP_BUTTON_PIN 15     // Define pin for the Up button (D15)
+#define DOWN_BUTTON_PIN 19   // Define pin for the Down button (D19)
+#define ENTER_BUTTON_PIN 18  // Define pin for the Enter button (D18)
+#define BUZZER_PIN 32  // Define the buzzer pin/
+
+// Pin assignments for DS18B20 sensors
+#define SENSOR_PIN_1 4
+#define SENSOR_PIN_2 5
+
+// OneWire instances for each sensor
+OneWire ds1(SENSOR_PIN_1);
+OneWire ds2(SENSOR_PIN_2);
+
+// Timing variables
+unsigned long lastRequestTime = 0; // To track the time of the last temperature request
+const unsigned long conversionTime = 750; // DS18B20 max conversion time (12-bit resolution)
+
+
+// Variables for menu navigation
+int currentSelection = 0;   // Tracks the current selected menu item
+unsigned long lastButtonPressTime = 0;  // Time of last button press
+const unsigned long debounceDelay = 200;  // Debounce delay for buttons
+
+// Menu items to display
+const char *menuItems[] = {
+  "1.Temp 00.00",  // Will add degree symbol here later
+  "2.Rise Tym 000m",
+  "3.Hold Tym 000m",
+  "4.Fall Tym 000m",
+  "5.Return",
+  "6.Continue"
+};
+
+/*/ Global variables to store the values from the menu
+float tempValue = 0.0;
+float riseTime = 0.0;
+float holdTime = 0.0;
+float fallTime = 0.0;
+*/
+
+//***********************here*******************
+unsigned long clientHandleStartTime = 0;  // Variable to store the start time of handleClient
+const long clientHandleInterval = 1000;   // Interval of 1 second
+//************************ here********************
+
+// Global variables to store the values from the menu
+int tempValue = 0;
+int riseTime = 0;
+int holdTime = 0;
+int fallTime = 0;
+
+
+const int menuSize = 6; // Total number of menu items
+const int itemsPerRow = 2; // Number of items per row
+
+// Custom degree symbol (°)
+byte degreeSymbol[8] = {
+  0b00000,
+  0b00100,
+  0b01010,
+  0b00100,
+  0b00000,
+  0b00000,
+  0b00000,
+  0b00000
+};
+
+
+// Sensor states
+enum SensorState { START_CONVERSION, READ_TEMPERATURE };
+SensorState sensorState = START_CONVERSION;
+
+// Temperatures
+float t1 = -127.0, t2 = -127.0;
+float results[3]; // Array to store average, t1, and t2
+
+
+// Constants
+#define LONG_PRESS_DURATION 2000 // Long press duration in milliseconds
+
+// Variables to track button states
+unsigned long enter_press_time = 0;
+unsigned long down_press_time = 0;
+unsigned long up_press_time = 0;
+
+float p = 0.0;
+// Store the web button value
+int buttonPressed = 0;
+int buttonPressedLong= 0;
+
+
+// Heater and fan web states (0 = OFF, 1 = ON)
+bool heaterState = false;
+bool fanState = false;
+
+// Store the content of the LCD rows
+String row1 = "";
+String row2 = "";
+
+
+// Set the LCD I2C address and dimensions (16 columns, 2 rows)
+#define I2C_ADDR 0x27
+#define LCD_COLUMNS 16
+#define LCD_ROWS 2
+// Initialize the LiquidCrystal_I2C object
+LiquidCrystal_I2C lcd(I2C_ADDR, LCD_COLUMNS, LCD_ROWS);
+
+
+// Function prototypes
+float read_value(const char *prompt);
+void setupButtons();
+void call_buzzer(int, int, int, int, int);
+void clear_display(int x, int y);
+int read_button();
+void display(int , int , const char* ) ;
+float string_to_float(String string_argument);
+int showMenu(const char* title, const char* options[], int total_options);
+float* read_temperature();
+void showMenu();
+void displayPage(int currentPage, int selectedItem, const char *menuItems[], int itemsPerPage);
+void loadFromEEPROM();
+void saveToEEPROM() ;
+int displayCuringParameters(int finalTemp, int riseTime, int holdTime, int fallTime);
+void controlTemperature(int maxTemp, int riseTime, int holdTime, int fallTime);
+bool read_temperature_non_blocking();
+
+void setupWiFi() {
+    WiFi.config(staticIP, gateway, subnet);
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+    }
+}
+
+void setupServer() {
+    // Define route for fetching LCD content
+    server.on("/lcd", HTTP_GET, sendLcdContent);  // Call the function to send content
+    // Initialize the server
+    server.on("/button", HTTP_GET, []() {
+        String buttonLabel = server.arg("button");  // Get the button label from the query parameter
+        buttonPressed = read_button_web(buttonLabel);  // Call the function with the button label
+        server.send(200, "text/plain", String(buttonPressed));  // Send back the corresponding button number
+    });
+
+    // Define routes to check heater and fan states
+    server.on("/run_fan", HTTP_GET, []() {
+        String state = server.arg("state");
+        if (state == "check") {
+            String fanStateResponse = fanState ? "Fan is ON" : "Fan is OFF";
+            server.send(200, "text/plain", fanStateResponse);
+        }
+    });
+
+    server.on("/run_heater", HTTP_GET, []() {
+        String state = server.arg("state");
+        if (state == "check") {
+            String heaterStateResponse = heaterState ? "Heater is ON" : "Heater is OFF";
+            server.send(200, "text/plain", heaterStateResponse);
+        }
+    });
+
+    server.begin();
+}
+// Function to handle controlling the heater
+void call_heater_web(int state) {
+  heaterState = (state == 1);  // Set heater state (1 for ON, 0 for OFF)
+  Serial.print("Heater state: ");
+  Serial.println(heaterState ? "ON" : "OFF");
+}
+
+// Function to handle controlling the fan
+void call_fan_web(int state) {
+  fanState = (state == 1);  // Set fan state (1 for ON, 0 for OFF)
+  Serial.print("Fan state: ");
+  Serial.println(fanState ? "ON" : "OFF");
+}
+
+// Function to handle button presses and return the corresponding button number
+int read_button_web(String label) {
+    if (label == "Enter") return 1;  // Enter button
+    else if (label == "Down") return 2;  // Down button
+    else if (label == "Up") return 3;  // Up button
+    else if (label == "Accept") return 4;  // Accept button
+    else if (label == "Clear") return 5;  // Clear button
+    else if (label == "Back") return 6;  // Back button
+    else return 0;  // Unknown button
+}
+
+// Function to update the content of both rows
+void updateLCDContent() {
+    lcd.setCursor(0, 0);
+    lcd.print(row1);
+
+    lcd.setCursor(0, 1);
+    lcd.print(row2);
+}
+
+// Function to send the LCD content to the client
+void sendLcdContent() {
+    String lcdContent = row1 + "\n" + row2;
+    server.send(200, "text/plain", lcdContent);  // Send the LCD content as plain text
+}
+
+
+
+
+
+void setup() {
+  Serial.begin(9600);  // Start serial communication
+  //saveToEEPROM();    // Save data to EEPROM
+  loadFromEEPROM();  // Load data to verify
+     Wire.begin();
+    lcd.init();
+    lcd.backlight();
+
+    setupWiFi();
+    setupServer();
+    pinMode(UP_BUTTON_PIN, INPUT);    // Set UP button pin as input with pull-up resistor
+    pinMode(DOWN_BUTTON_PIN, INPUT);  // Set DOWN button pin as input with pull-up resistor
+    pinMode(ENTER_BUTTON_PIN, INPUT); // Set ENTER button pin as input with pull-up resistor
+       pinMode(BUZZER_PIN, OUTPUT); // Set the buzzer pin as output
+    digitalWrite(BUZZER_PIN, LOW); // Ensure the buzzer is off initially
+      pinMode(heaterPin, OUTPUT);
+  digitalWrite(heaterPin, LOW); // Turn off the heater initially
+   pinMode(fanPin, OUTPUT);
+  digitalWrite(fanPin, LOW); // Turn off the heater initially
+  
+Serial.println("i am in setup ");
+
+ 
+
+}
+
+void loop() {
+  
+//Serial.print("i am here ");
+    //server.handleClient();
+    const char* state1_options[] = {"CURING CHAMBER", "PRESS ENTER"};
+    //Serial.print("i am here ");
+    const char* state2_options[] = {"1.START CURING", "2.SHOW TEMP", "3.RETURN"};
+    const char* state3_1_options[] = {"1.STANDARD", "2.CUSTOM", "3.RETURN"};
+    //const char* state
+
+    float prevT1 = -1.0, prevT2 = -1.0;
+    bool firstTime = true; // Flag to show "Reading Temp..." only once
+
+    while (true) {
+        //server.handleClient();
+         //Serial.print("i am here ");
+        int state1_reply = showMenu("Home Page", state1_options, 2);
+
+        if (state1_reply == 1) {
+            clear_display(-1, -1);
+            lcd.print("Invalid Choice");
+            row1="";
+            row2="";
+            row1="Invalid Choice";
+                  clientHandleStartTime = millis();  
+
+                    // Run server.handleClient() for 1 second
+                  while (millis() - clientHandleStartTime < clientHandleInterval+1000) {
+                          server.handleClient();  // Handle client
+                              }
+            //delay(2000);  // Show error and loop back to the home screen
+        } else if (state1_reply == 2) {
+            while (true) {
+                int state2_reply = showMenu("Main Menu", state2_options, 3);
+
+            if (state2_reply == 1) {
+    while (true) {
+        int state3_1_reply = showMenu("Curing Options", state3_1_options, 3);
+        if (state3_1_reply == 1) {
+            // Clear the display and show the first part of the message
+            clear_display(-1, -1);
+            row1="";
+            row2="";
+            row1="starting now...";
+            lcd.print("starting now...");
+            clientHandleStartTime = millis();  
+
+                    // Run server.handleClient() for 1 second
+                  while (millis() - clientHandleStartTime < clientHandleInterval+1000) {
+                          server.handleClient();  // Handle client
+                              }
+            //delay(1000);
+            int apple =displayCuringParameters(100,60,240,60);
+          if(apple == 4)
+          {
+            lcd.clear();
+            row1="";
+            row2="";
+            lcd.setCursor(0, 0);
+            lcd.print("Starting curing");  // First row fixed text
+            row1="Starting curing";
+            //delay(1000);
+
+            // Start countdown in the second row
+            for (int i = 3; i >= 1; i--) {
+                server.handleClient();
+                lcd.setCursor(0, 1);  // Set the second row
+                lcd.print("Process in "); // Fixed text part
+                row2="Process in " + String(i) + "sec";
+                lcd.print(i);  // Countdown number
+                lcd.print(" sec");  // "sec" will stay
+                clientHandleStartTime = millis();  
+
+                    // Run server.handleClient() for 1 second
+                  while (millis() - clientHandleStartTime < clientHandleInterval) {
+                          server.handleClient();  // Handle client
+                              }
+                //delay(1000);  // Wait for 1 second before changing the countdown number
+            }
+
+            // After countdown finishes, display "Started" message
+            
+
+            controlTemperature(100,60,240,60);
+            
+           break;
+          }
+          if(apple == 6)
+          {
+            lcd.clear();
+            row1="";
+            row2="";
+            row1="returning...";
+            lcd.print("returning...");
+            clientHandleStartTime = millis();  
+
+                    // Run server.handleClient() for 1 second
+                  while (millis() - clientHandleStartTime < clientHandleInterval+1000) {
+                          server.handleClient();  // Handle client
+                              }
+                //delay(1000);  // Wait for 1 second before changing the countdown number
+            
+            //delay(2000);
+            break;
+          }
+        }
+            
+         else if (state3_1_reply == 2) {
+            clear_display(-1, -1);
+            row1="";
+            row2="";
+            row1="Custom Mode";
+
+            lcd.print("Custom Mode");
+            // Start the timer to handle server for 1 second
+  clientHandleStartTime = millis();  
+
+  // Run server.handleClient() for 1 second
+  while (millis() - clientHandleStartTime < clientHandleInterval+1000) {
+    server.handleClient();  // Handle client
+  }
+            //delay(2000);
+            //float finalValue = read_value("enter temp"); // Call the read_value function
+            //clear_display(-1, -1);
+            //if(read_button()== 6)
+            //{
+            //lcd.print("returning...");
+            //delay(2000);
+            //break;
+            
+            showMenu();
+        }
+         else if (state3_1_reply == 3) {
+            break;
+        }
+    }
+} else if (state2_reply == 2) {  // Show Temperature
+                    while (true) {
+                      server.handleClient();
+                        // Only print once during the first time in this menu
+if (firstTime) {
+    clear_display(-1, -1);
+    lcd.setCursor(0, 0);
+    lcd.print("T1=");
+    lcd.setCursor(0, 1);
+    lcd.print("T2=");
+    firstTime = false;
+}
+
+// Read and check the temperature
+if (read_temperature_non_blocking()) {
+    // Only update T1 if it has changed
+    if (results[1] != prevT1) {
+        lcd.setCursor(3, 0);  // Update the value position for T1
+        lcd.print(results[1], 1);  // Update T1 value
+        lcd.print((char)0xDF);  // Add degree symbol
+        lcd.print("C");  // Add "C" for Celsius
+        row1 = "T1=" + String(results[1], 1) + "DC";  // Store in row1 with "DC" instead of degree symbol
+        prevT1 = results[1];  // Store the new T1 value
+    }
+
+    // Only update T2 if it has changed
+    if (results[2] != prevT2) {
+        lcd.setCursor(3, 1);  // Update the value position for T2
+        lcd.print(results[2], 1);  // Update T2 value
+        lcd.print((char)0xDF);  // Add degree symbol
+        lcd.print("C");  // Add "C" for Celsius
+        row2 = "T2=" + String(results[2], 1) + "DC";  // Store in row2 with "DC" instead of degree symbol
+        prevT2 = results[2];  // Store the new T2 value
+    }
+}
+
+                        // Check for button input to return to the previous menu
+                        int button = read_button();
+                        if (button == 6) {
+                            firstTime = true;  // Reset flag for next time
+                            break;  // Return to Main Menu
+                        }
+                    }
+                } else if (state2_reply == 3) {  // Return to Home Page
+                    break;
+                }
+            }
+        }
+    }
+}
+
+
+void controlTemperature(int maxTemp, int riseTime, int holdTime, int fallTime) {
+  enum State { RISE, HOLD, FALL, COMPLETE };
+  State currentState = RISE;
+
+  unsigned long stateStartMillis = millis();
+  unsigned long elapsedMillis = 0;
+  unsigned long lastDisplayUpdate = 0;
+  bool isPaused = false;
+
+
+
+  while (!read_temperature_non_blocking()) {
+    clientHandleStartTime = millis();  
+    while (millis() - clientHandleStartTime < clientHandleInterval - 990) {
+      server.handleClient();
+    }
+  }
+
+  float initialTemp = results[0];
+  float targetTemp = initialTemp;
+
+  Serial.print("Initial Temp: ");
+  Serial.println(initialTemp);
+
+  digitalWrite(heaterPin, LOW);
+  call_heater_web(0);
+  digitalWrite(fanPin, HIGH);
+  call_fan_web(1);
+  lcd.clear();
+  lcd.print("RISE");
+
+  row1 = "RISE        ";
+  row2 = "            ";
+
+  call_buzzer(1, 1500, 0, 1, 1);
+
+  const float tempTolerance = 1.0;
+  bool heaterOn = false;
+
+  while (currentState != COMPLETE) {
+
+ server.handleClient();
+    int buttonState = read_button();
+   
+/*
+    if (buttonState == 6) {
+      lcd.clear();
+      lcd.print("Terminating...");
+      row1 = "Terminating...";
+      row2 = "            ";
+
+      clientHandleStartTime = millis();
+      while (millis() - clientHandleStartTime < clientHandleInterval + 1000) {
+        server.handleClient();
+      }
+      lcd.clear();
+      return;
+    } 
+*/
+    // Pause and Resume Logic
+     if (buttonState == 5) {
+      isPaused = true;
+      digitalWrite(heaterPin, LOW);
+      call_heater_web(0);
+      digitalWrite(fanPin, LOW);
+      call_fan_web(0);
+      lcd.clear();
+      lcd.print("Paused...");
+      row1 = "Paused...";
+      row2 = "            ";
+
+     while (isPaused) {
+    server.handleClient(); // Continuously handle client while paused
+
+    int newButtonState = read_button();
+    if (newButtonState == 4) { // Resume
+        isPaused = false;
+        stateStartMillis = millis() - elapsedMillis; // Adjust start time
+        
+        lcd.clear();
+        lcd.print("Resuming...");
+        call_fan_web(1);
+        digitalWrite(fanPin, HIGH);  // Ensure fan resumes if needed
+        
+        // Restore row values
+        row1 = "Resuming...  ";
+        row2 = "            ";
+
+        // Wait a moment to update display
+        clientHandleStartTime = millis();
+        while (millis() - clientHandleStartTime < clientHandleInterval) {
+            server.handleClient();
+        }
+        
+        lcd.clear();
+
+        // **Immediately re-evaluate the heater status**
+        float currentTemp = results[0];
+        if (currentTemp < targetTemp - tempTolerance) {
+            digitalWrite(heaterPin, HIGH); // Ensure heater resumes
+row2 = row2.substring(0, 5) + "H " + row2.substring(7);
+        //row2 = row2.substring(0, 5) + "  " + row2.substring(7);
+            call_heater_web(1);
+            heaterOn = true;
+        } else if (currentTemp > targetTemp + tempTolerance) {
+            digitalWrite(heaterPin, LOW);
+           // row2 = row2.substring(0, 5) + "H " + row2.substring(7);
+        row2 = row2.substring(0, 5) + "  " + row2.substring(7);
+            call_heater_web(0);
+            heaterOn = false;
+        }
+
+    } else if (newButtonState == 6) { // Exit if button 6 is pressed during pause
+        lcd.clear();
+        lcd.print("Terminating...");
+        row1 = "Terminating... ";
+        row2 = "            ";
+         digitalWrite(heaterPin, LOW);
+         digitalWrite(fanPin,LOW);
+         call_heater_web(0);
+         call_fan_web(0);
+        clientHandleStartTime = millis();
+        while (millis() - clientHandleStartTime < clientHandleInterval + 1000) {
+            server.handleClient();
+        }
+        lcd.clear();
+        return;
+    }
+}
+
+    }
+
+    elapsedMillis = millis() - stateStartMillis;
+    int elapsedSeconds = elapsedMillis / 1000;
+    int elapsedMinutes = elapsedSeconds / 60;
+    int elapsedHours= elapsedMinutes / 60;
+    elapsedSeconds %= 60;
+    elapsedMinutes %= 60;
+    elapsedHours %= 60;
+
+    switch (currentState) {
+      case RISE: {
+        float progress = (float)elapsedMillis / (riseTime * 60 * 1000);
+        targetTemp = initialTemp + progress * (maxTemp - initialTemp);
+
+        Serial.print("targetTemp: ");
+        Serial.println(targetTemp);
+        Serial.print("averageTemp: ");
+        Serial.println(results[0]);
+
+        if (elapsedMillis >= riseTime * 60 * 1000) {
+          currentState = HOLD;
+          lcd.clear();
+          lcd.print("HOLD");
+          row1 = "HOLD        ";
+          call_buzzer(2, 500, 200, 1, 1);
+          targetTemp = maxTemp;
+          stateStartMillis = millis();
+        }
+        break;
+      }
+
+      case HOLD:
+        targetTemp = maxTemp;
+
+        if (elapsedMillis >= holdTime * 60 * 1000) {
+          currentState = FALL;
+          lcd.clear();
+          lcd.print("FALL");
+          row1 = "FALL        ";
+          call_buzzer(3, 500, 200, 1, 1);
+          stateStartMillis = millis();
+        }
+        break;
+
+      case FALL: {
+        float progress = (float)elapsedMillis / (fallTime * 60 * 1000);
+        targetTemp = maxTemp - progress * (maxTemp - initialTemp);
+
+        if (elapsedMillis >= fallTime * 60 * 1000) {
+          currentState = COMPLETE;
+          lcd.clear();
+          lcd.print("Completed");
+          row1 = "Completed    ";
+          
+
+lcd.clear();
+            row1="";
+            row2="";
+            lcd.print("curing completed");
+            row1="curing completed";
+            digitalWrite(heaterPin, LOW);
+  call_heater_web(0);
+  digitalWrite(fanPin, LOW);
+  call_fan_web(0);
+            call_buzzer(4, 100, 100, 4, 10);
+            clientHandleStartTime = millis();  
+
+  // Run server.handleClient() for 1 second
+  while (millis() - clientHandleStartTime < clientHandleInterval+5000) {
+    server.handleClient();  // Handle client
+  }
+
+           // delay(5000);
+
+
+
+          //call_buzzer(4, 100, 100, 4, 10);
+        }
+        break;
+      }
+
+      default:
+        break;
+    }
+
+    if (read_temperature_non_blocking()) {
+      float currentTemp = results[0];
+      if (currentTemp < targetTemp - tempTolerance && !heaterOn) {
+        digitalWrite(heaterPin, HIGH);
+        call_heater_web(1);
+        heaterOn = true;
+      } else if (currentTemp > targetTemp + tempTolerance && heaterOn) {
+        digitalWrite(heaterPin, LOW);
+        call_heater_web(0);
+        heaterOn = false;
+      }
+    }
+
+    if (millis() - lastDisplayUpdate >= 250) {
+      lastDisplayUpdate = millis();
+
+      lcd.setCursor(0, 0);
+      lcd.print("T1=");
+      lcd.print((int)results[1]);
+      lcd.print((char)0xDF);
+      lcd.print("C ");
+
+      row1 = "T1=" + String((int)results[1]) + "DC ";
+
+      lcd.setCursor(8, 0);
+      lcd.print("T2=");
+      lcd.print((int)results[2]);
+      lcd.print((char)0xDF);
+      lcd.print("C");
+
+      row1 = row1 + "T2=" + String((int)results[2]) + "DC";
+
+      lcd.setCursor(0, 1);
+      if (currentState == RISE) {
+        lcd.print("RISE");
+        row2 = "RISE" + row2.substring(4);
+      } else if (currentState == HOLD) {
+        lcd.print("HOLD");
+        row2 = "HOLD" + row2.substring(4);
+      } else if (currentState == FALL) {
+        lcd.print("FALL");
+        row2 = "FALL" + row2.substring(4);
+      }
+      lcd.print("   ");
+
+      lcd.setCursor(5, 1);
+      if (heaterOn) {
+        lcd.print("H ");
+        row2 = row2.substring(0, 5) + "H " + row2.substring(7);
+        //row2 = row2.substring(0, 5) + "  " + row2.substring(7);
+      } else {
+        lcd.print("  ");
+        row2 = row2.substring(0, 5) + "  " + row2.substring(7);
+      }
+
+      lcd.setCursor(8, 1);
+      if(elapsedHours <10) lcd.print("0");
+      lcd.print(elapsedHours);
+      lcd.print(":");
+      if(elapsedMinutes < 10) lcd.print("0");
+      lcd.print(elapsedMinutes);
+      lcd.print(":");
+      if (elapsedSeconds < 10) lcd.print("0");
+      lcd.print(elapsedSeconds);
+      
+      row2 = row2.substring(0, 8) + " " + String(elapsedHours) + ":" + String(elapsedMinutes) + ":" + String(elapsedSeconds);
+      server.handleClient();
+    }
+  }
+
+  digitalWrite(heaterPin, LOW);
+  call_heater_web(0);
+  digitalWrite(fanPin, LOW);
+  call_fan_web(0);
+}
+
+
+
+
+
+void showMenu() {
+  lcd.begin(16, 2);    // Initialize LCD display
+  lcd.clear();         // Clear LCD
+  lcd.createChar(0, degreeSymbol);  // Create custom degree symbol
+  unsigned long currentMillis = millis(); // Track time for debouncing
+  int selectedItem = currentSelection;    // Start with the current selected item
+
+  // Display the menu items
+  updateMenuDisplay(selectedItem);
+
+  while (true) {
+    currentMillis = millis(); // Track time for debouncing
+    // Check for button press and handle debouncing
+    server.handleClient(); 
+    Serial.print("i am here inside custom ");
+    int button = read_button();
+    if (button != 0 && (currentMillis - lastButtonPressTime) > debounceDelay) {
+      lastButtonPressTime = currentMillis;  // Record the time of button press
+
+      // Handle button actions based on input
+      if (button == 2) {  // DOWN button pressed
+        // Move to the next item
+        selectedItem = (selectedItem + 1) % menuSize;
+        currentSelection = selectedItem;  // Update the current selection
+        updateMenuDisplay(selectedItem);  // Refresh the menu display
+      } else if (button == 3) {  // UP button pressed
+        // Move to the previous item
+        selectedItem = (selectedItem - 1 + menuSize) % menuSize;
+        currentSelection = selectedItem;  // Update the current selection
+        updateMenuDisplay(selectedItem);  // Refresh the menu display
+      } else if (button == 4) {  // ENTER button pressed (used for confirming)
+        // Action based on selected menu item
+        if (selectedItem == 0) {  // Temp
+          tempValue = read_value("Enter Temp:");
+          saveToEEPROM();
+          updateMenuDisplay(0);  // Refresh the Temp menu item
+        } else if (selectedItem == 1) {  // Rise Time
+          riseTime = read_value("Rise Time:");
+          saveToEEPROM();
+          updateMenuDisplay(1);  // Refresh the Rise Time menu item
+        } else if (selectedItem == 2) {  // Hold Time
+          holdTime = read_value("Hold Time:");
+          saveToEEPROM();
+          updateMenuDisplay(2);  // Refresh the Hold Time menu item
+        } else if (selectedItem == 3) {  // Fall Time
+          fallTime = read_value("Fall Time:");
+          saveToEEPROM();
+          updateMenuDisplay(3);  // Refresh the Fall Time menu item
+        } else if (selectedItem == 4) {  // Return
+          lcd.clear();
+          row1="";
+          row2="";
+          lcd.print("Returning...");
+          row1 = "Returning...";
+          // Start the timer to handle server for 1 second
+  clientHandleStartTime = millis();  
+
+  // Run server.handleClient() for 1 second
+  while (millis() - clientHandleStartTime < clientHandleInterval) {
+    server.handleClient();  // Handle client
+  }
+    
+
+          break;  // Exit the menu loop
+        } else if (selectedItem == 5) {  // Continue
+          lcd.clear();
+          row1="";
+          row2="";
+          lcd.print("Continuing...");
+          row1= "Continuing...";
+          clientHandleStartTime = millis();  
+
+  // Run server.handleClient() for 1 second
+  while (millis() - clientHandleStartTime < clientHandleInterval+1000) {
+    server.handleClient();  // Handle client
+  }
+          //delay(2000);
+          int apple =displayCuringParameters(tempValue,riseTime,holdTime,fallTime);
+          if(apple == 4)
+          {
+            lcd.clear();
+            row1="";
+            row2="";
+             //lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print("Starting curing");  // First row fixed text
+            row1="Starting curing";
+            
+            //delay(1000);
+
+            // Start countdown in the second row
+            for (int i = 3; i >= 1; i--) {
+              server.handleClient();
+                lcd.setCursor(0, 1);  // Set the second row
+                lcd.print("Process in "); // Fixed text part
+                row2="Process in " + String(i) + "sec" ;
+                lcd.print(i);  // Countdown number
+
+                lcd.print(" sec");  // "sec" will stay
+                //delay(1000);  // Wait for 1 second before changing the countdown number
+              clientHandleStartTime = millis();  
+
+  // Run server.handleClient() for 1 second
+  while (millis() - clientHandleStartTime < clientHandleInterval) {
+    server.handleClient();  // Handle client
+  }
+
+
+            }
+
+            // After countdown finishes, display "Started" message
+            controlTemperature(tempValue,riseTime,holdTime,fallTime);
+            
+            break;
+          }
+          if(apple == 6)
+          {
+            lcd.clear();
+            row1="";
+            row2="";
+            lcd.print("returning");
+            row1="returning";
+clientHandleStartTime = millis();  
+
+  // Run server.handleClient() for 1 second
+  while (millis() - clientHandleStartTime < clientHandleInterval+1000) {
+    server.handleClient();  // Handle client
+  }
+            //delay(2000);
+            break;
+          }
+          //delay(1000);
+          //break;  // Exit the menu loop
+        }
+      }
+    }
+  }
+}
+
+int displayCuringParameters(int finalTemp, int riseTime, int holdTime, int fallTime) {
+  unsigned long lastToggleTime = 0; // To track the last toggle time
+  const unsigned long toggleInterval = 2000; // 1-second interval
+  int messageIndex = 0; // Index to track which message to display
+  buttonPressedLong=0;
+  while (true) {
+    // Get the current time
+    unsigned long currentTime = millis();
+
+    // Check if it's time to toggle the message
+    if (currentTime - lastToggleTime >= toggleInterval) {
+      lastToggleTime = currentTime; // Update the last toggle time
+      lcd.clear(); // Clear the screen before updating the message
+      row1 = "";
+      row2 = "";
+
+      // Display the appropriate message based on the index
+      switch (messageIndex) {
+        case 0:
+          lcd.clear();
+          row1 = "";
+      row2 = "";
+          lcd.print("FINAL TEMP = ");
+          row1 = "FINAL TEMP =";
+          lcd.setCursor(0,1);
+          row2 = String(finalTemp) + "DC";
+          lcd.print(finalTemp);
+          lcd.print((char)0xDF); // Degree symbol
+          lcd.print("C");
+          break;
+
+        case 1:
+          lcd.clear();
+          row1="";
+          row2="";
+          lcd.print("RISE TIME = ");
+          row1="RISE TIME =";
+          lcd.setCursor(0,1);
+          row2=String(riseTime) + "min";
+          lcd.print(riseTime);
+          lcd.print(" min");
+          if (riseTime >= 60) {
+            row2 = String(riseTime) + "min" + "(" + String(riseTime / 60.0) + " hr)";
+            lcd.setCursor(8, 1);
+            lcd.print("(");
+            lcd.print(riseTime / 60.0);
+            lcd.print("hr)");
+          }
+          break;
+
+        case 2:
+          lcd.clear();
+          row1="";
+          row2="";
+          lcd.print("HOLD TIME = ");
+          row1="HOLD TIME =";
+          lcd.setCursor(0,1);
+          row2=String(holdTime)+ "min";
+          lcd.print(holdTime);
+          lcd.print(" min");
+          if (holdTime >= 60) {
+            
+            row2 =String(holdTime) + "min" + "(" + String(holdTime / 60.0) + " hr)";
+            lcd.setCursor(8, 1);
+            lcd.print("(");
+            lcd.print(holdTime / 60.0);
+            lcd.print("hr)");
+          }
+          break;
+
+        case 3:
+          lcd.clear();
+          row1="";
+          row2="";
+          row1="FALL TIME = ";
+          lcd.print("FALL TIME = ");
+          lcd.setCursor(0,1);
+          row2=String(fallTime) + "min" ;
+          lcd.print(fallTime);
+          lcd.print(" min");
+          if (fallTime >= 60) {
+            
+            row2 = String(fallTime) + "min" + "(" + String(fallTime / 60.0) + " hr)";
+            lcd.setCursor(8, 1);
+            lcd.print("(");
+            lcd.print(fallTime / 60.0);
+            lcd.print("hr)");
+          }
+          break;
+
+        case 4:
+          row1="Press Accept to";
+          lcd.print("Press Accept to");
+
+          lcd.setCursor(0, 1);
+          row2="confirm";
+          lcd.print("Confirm");
+          break;
+      }
+
+      // Increment the message index and loop back to 0 if it exceeds 4
+      messageIndex = (messageIndex + 1) % 5;
+    }
+
+    // Check the button state
+     server.handleClient();
+    int buttonState = read_button(); // Check the button state
+
+    if (buttonState == 4 || buttonPressedLong == 4) { // Enter button pressed
+    server.handleClient();
+      buttonPressedLong=0;
+      row1="";
+      row2="";
+      //server.handleClient();
+      lcd.clear();
+      row1="OK. Starting";
+      //server.handleClient();
+      lcd.print("OK. Starting");
+      lcd.setCursor(0, 1);
+      row2="Curing...";
+      //server.handleClient();
+      lcd.print("curing...");
+      clientHandleStartTime = millis();  
+
+  // Run server.handleClient() for 1 second
+  while (millis() - clientHandleStartTime < clientHandleInterval+1000) {
+    server.handleClient();  // Handle client
+  }
+      //delay(2000); // Optional display for 2 seconds
+      return(4); // Exit the function
+    } else if (buttonState == 6 || buttonPressedLong== 6) { // Cancel button pressed
+      buttonPressedLong=0;
+      lcd.clear();
+      row1="";
+      row2="";
+//server.handleClient();
+      lcd.print("Operation");
+      row1="Operation";
+      //server.handleClient();
+      lcd.setCursor(0, 1);
+      row2="Terminated";
+      //server.handleClient();
+      lcd.print("Terminated");
+      clientHandleStartTime = millis();  
+
+  // Run server.handleClient() for 1 second
+  while (millis() - clientHandleStartTime < clientHandleInterval+1000) {
+    server.handleClient();  // Handle client
+  }
+     // delay(2000); // Optional display for 2 seconds
+      return(6); // Exit the function
+    }
+  }
+}
+void saveToEEPROM() {
+  EEPROM.begin(EEPROM_SIZE); // Initialize EEPROM with defined size
+  
+  EEPROM.put(TEMP_ADDR, tempValue);  // Save tempValue
+  EEPROM.put(RISE_ADDR, riseTime);  // Save riseTime
+  EEPROM.put(HOLD_ADDR, holdTime);  // Save holdTime
+  EEPROM.put(FALL_ADDR, fallTime);  // Save fallTime
+
+  EEPROM.commit(); // Commit changes to EEPROM
+  Serial.println("Data saved to EEPROM");
+}
+
+void loadFromEEPROM() {
+  EEPROM.begin(EEPROM_SIZE); // Initialize EEPROM
+
+  EEPROM.get(TEMP_ADDR, tempValue);  // Load tempValue
+  EEPROM.get(RISE_ADDR, riseTime);  // Load riseTime
+  EEPROM.get(HOLD_ADDR, holdTime);  // Load holdTime
+  EEPROM.get(FALL_ADDR, fallTime);  // Load fallTime
+
+}
+
+
+// Function to update the menu display based on the selected item
+void updateMenuDisplay(int selectedItem) {
+  lcd.clear();  // Clear the LCD screen
+
+  
+  char tempBuffer[10]; // Buffer to store the formatted temperature
+  // Loop through the menu items and store the content in row1 and row2
+for (int i = 0; i < itemsPerRow; i++) {
+    int menuIndex = (i + (currentSelection / itemsPerRow) * itemsPerRow) % menuSize;
+
+    // Prepare the line content
+    String line = (menuIndex == selectedItem) ? ">" : " ";  // Show ">" for selection
+
+    // Append the menu item
+    if (menuIndex == 0) {
+        dtostrf(tempValue, 6, 2, tempBuffer);  // Convert float to properly formatted string
+        line += "1.Temp ";
+        line += String(tempBuffer);  // Append temperature value
+
+        line += "D";  // Temporarily store "D" for degree symbol replacement
+        line += "C";  // Celsius
+    } else if (menuIndex == 1) {
+        line += "2.Rise  " + String(riseTime) + "m";
+    } else if (menuIndex == 2) {
+        line += "3.Hold  " + String(holdTime) + "m";
+    } else if (menuIndex == 3) {
+        line += "4.Fall  " + String(fallTime) + "m";
+    } else if (menuIndex == 4) {
+        line += "5.Return";
+    } else if (menuIndex == 5) {
+        line += "6.Continue";
+    }
+
+    // Store the line content
+    if (i == 0) row1 = line;
+    if (i == 1) row2 = line;
+}
+
+// Now, use your existing LCD printing mechanism
+for (int i = 0; i < itemsPerRow; i++) {
+    int menuIndex = (i + (currentSelection / itemsPerRow) * itemsPerRow) % menuSize;
+
+    lcd.setCursor(0, i);  // Set cursor to row
+    if (menuIndex == selectedItem) {
+        lcd.print(">");  // Show ">" without space to indicate selection
+    } else {
+        lcd.print(" ");  // No space before items
+    }
+
+    // Print the stored row1 and row2 values but manually replace "D" with the degree symbol
+    String row = (i == 0) ? row1 : row2;
+    
+    for (int j = 1; j < row.length(); j++) {  // Skip first char (">" or " ")
+        if (row[j] == 'D') lcd.write(0xDF);  // Print degree symbol correctly
+        else lcd.print(row[j]);
+    }
+}
+
+}
+
+// System failure handling
+void system_failure() {
+    lcd.clear();
+    row1="";
+    row2="";
+    lcd.print("System Failure!");
+    server.handleClient();  // Handle client
+    digitalWrite(heaterPin,LOW);
+    digitalWrite(fanPin,LOW);
+    call_buzzer(5,100,100,5,1);
+    
+    row1="System Failure!";
+    //server.handleClient();  // Handle client
+    //delay(5000); // Show failure message and halt system
+    while (true)
+    {
+      server.handleClient();  // Handle client
+    };
+}
+// Non-blocking temperature reading function
+bool read_temperature_non_blocking() {
+    static byte addr1[8], addr2[8], data[9];
+    if (sensorState == START_CONVERSION) {
+        // Start temperature conversion for both sensors
+        if (ds1.search(addr1)) {
+            ds1.reset();
+            ds1.select(addr1);
+            ds1.write(0x44, 1); // Start conversion
+        }
+        if (ds2.search(addr2)) {
+            ds2.reset();
+            ds2.select(addr2);
+            ds2.write(0x44, 1); // Start conversion
+        }
+        ds1.reset_search();
+        ds2.reset_search();
+
+        // Move to the next state and start timing
+        sensorState = READ_TEMPERATURE;
+        lastRequestTime = millis();
+        return false; // Still waiting for conversion to complete
+    } else if (sensorState == READ_TEMPERATURE) {
+        if (millis() - lastRequestTime >= conversionTime) {
+            // Read temperature from Sensor 1
+            ds1.reset();
+            ds1.select(addr1);
+            ds1.write(0xBE); // Read Scratchpad
+            for (int i = 0; i < 9; i++) {
+                data[i] = ds1.read();
+            }
+            int16_t raw = (data[1] << 8) | data[0];
+            t1 = (float)raw / 16.0;
+
+            // Read temperature from Sensor 2
+            ds2.reset();
+            ds2.select(addr2);
+            ds2.write(0xBE); // Read Scratchpad
+            for (int i = 0; i < 9; i++) {
+                data[i] = ds2.read();
+            }
+            raw = (data[1] << 8) | data[0];
+            t2 = (float)raw / 16.0;
+
+            // Check for valid readings
+            if (t1 == -127.0 || t2 == -127.0) {
+                Serial.println("Error: Unable to read from one or both sensors.");
+                system_failure();
+            }
+
+            // Check for temperatures out of range
+            if (t1 < 15.0 || t1 > 105.0 || t2 < 15.0 || t2 > 105.0) {
+                system_failure();
+            }
+
+            // Store results
+            results[1] = t1;
+            results[2] = t2;
+            results[0] = (t1 + t2) / 2.0;
+
+            // Reset state for the next reading
+            sensorState = START_CONVERSION;
+            return true; // Data is ready
+        }
+    }
+    return false; // Still waiting for conversion to complete
+}
+
+// Helper function to handle state3_1 replies
+void handleState3_1Reply(int state3_1_reply) {
+  clear_display(-1, -1);
+
+  switch (state3_1_reply) {
+    case 1:
+      lcd.print("Standard Mode");
+      break;
+
+    case 2:
+      lcd.print("Custom Mode");
+      break;
+
+    case 3:
+      lcd.print("Returning...");
+      break;
+
+    default:
+      lcd.print("Invalid Option");
+      break;
+  }
+
+  delay(5000); // Pause to display the message
+}
+
+
+int showMenu(const char* title, const char* options[], int total_options) {
+  const int max_visible_lines = 2; // Maximum lines visible on the LCD at a time
+  int current_selection = 0;       // Start with the first option
+  int top_line = 0;                // Index of the first visible line
+
+  unsigned long last_blink_time = 0; // To track blinking timing
+  bool arrow_visible = true;        // State of the blinking arrow
+
+  lcd.clear();
+  row1="";
+  row2="";
+  row1=String(title);
+  lcd.setCursor(0, 0);
+  lcd.print(title); // Display the menu title
+      // Start the timer to handle server for 1 second
+  clientHandleStartTime = millis();  
+
+  // Run server.handleClient() for 1 second
+  while (millis() - clientHandleStartTime < clientHandleInterval+500) {
+    server.handleClient();  // Handle client
+  }
+ // delay(1500); // Briefly show the title
+  lcd.clear();
+  row1="";
+  row2="";
+
+  while (true) {
+   
+
+// Clear the LCD
+lcd.clear();
+row1="";
+row2="";
+
+// Store options in row1 and row2
+for (int i = 0; i < max_visible_lines && (top_line + i) < total_options; i++) {
+    if (i == 0) row1 = options[top_line + i]; // First row
+    if (i == 1) row2 = options[top_line + i]; // Second row
+
+    lcd.setCursor(0, i);
+    lcd.print(options[top_line + i]);  // Print without assigning to row1/row2
+}
+
+// Show the blinking arrow on the selected option
+if (arrow_visible) {
+    lcd.setCursor(15, current_selection - top_line); // Place the arrow relative to the top_line
+    lcd.print("<");
+
+    // Append the arrow to the corresponding row string
+    if ((current_selection - top_line) == 0) row1 += " <";
+    if ((current_selection - top_line) == 1) row2 += " <";
+}
+
+//**********************************
+
+    // Wait for button press
+    Serial.print("i am here in button press");
+    //row1= "hello";
+    //row2= "world";
+    server.handleClient();
+    int button = read_button(); // Assume this function returns the button state
+
+    if (button == 3) { // Up button
+      if (current_selection > 0) {
+        current_selection--; // Move selection up
+        if (current_selection < top_line) {
+          top_line--; // Scroll the page up
+        }
+      } else {
+        // Wrap around to the last item
+        current_selection = total_options - 1;
+        top_line = max(0, total_options - max_visible_lines); // Adjust the page to show the last items
+      }
+    } else if (button == 2) { // Down button
+      if (current_selection < total_options - 1) {
+        current_selection++; // Move selection down
+        if (current_selection >= top_line + max_visible_lines) {
+          top_line++; // Scroll the page down
+        }
+      } else {
+        // Wrap around to the first item
+        current_selection = 0;
+        top_line = 0; // Reset to the first page
+      }
+    } else if (button == 4) { // Enter button (select)
+      return current_selection + 1; // Return the selected option (1-based index)
+    }
+
+    // Small delay to debounce button inputs
+    delay(100);
+  }
+}
+
+
+
+float read_value(const char *prompt) {
+    char valueArray[11] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.'}; // Available inputs
+    char inputBuffer[10] = {0}; // To store user-entered characters
+    int currentIndex = 0; // Index for inputBuffer
+    int arrayIndex = 0; // Index for valueArray
+    bool decimalSet = false; // Flag for decimal point presence
+    bool inputComplete = false; // Completion flag
+    float result = 0.0;
+
+    unsigned long lastButtonPress = 0; // For debouncing
+    const int debounceDelay = 200; // Minimum interval between button presses
+    const int longPressThreshold = 500; // Duration to distinguish short/long press
+
+    // Store the prompt in row1 (without modifying the display logic)
+    row1 = String(prompt); // Store prompt in row1
+    row2 = ""; // Initialize row2 for the input buffer content
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(row1); // Display the prompt stored in row1
+
+    while (!inputComplete) {
+        server.handleClient();  // Handle client
+        int button = read_button(); // Read button state
+        unsigned long pressStart = 0; // To track the start of a button press
+
+        if (button != 0) {
+            pressStart = millis(); // Record the time when the button is pressed
+
+            // Wait until button is released (to measure duration)
+            while (read_button() == button) {
+                // Do nothing, just wait for release
+            }
+
+            unsigned long pressDuration = millis() - pressStart; // Measure the press duration
+
+            // Long press (4, 5, or 6)
+            if (buttonPressedLong == 4) { // Long press ACCEPT
+                buttonPressedLong = 0;
+                if (currentIndex > 0) {
+                    result = atof(inputBuffer); // Convert inputBuffer to float
+                    result = round(result * 100.0) / 100.0; // Round to 2 decimal places
+                    inputComplete = true;
+                }
+            } else if (buttonPressedLong == 5) { // Long press CLEAR
+                buttonPressedLong = 0;
+                memset(inputBuffer, 0, sizeof(inputBuffer)); // Clear buffer
+                currentIndex = 0;
+                decimalSet = false;
+                lcd.clear();
+                lcd.setCursor(0, 0);
+                lcd.print(row1); // Redisplay the prompt from row1
+                row1=String(prompt);
+                row2="";
+            } else if (buttonPressedLong == 6) { // Long press RETURN
+                buttonPressedLong = 0;
+                lcd.clear();
+                lcd.print("Cancelled");
+                delay(1000);
+                return -1; // Return -1 to indicate cancellation
+            }
+
+            if ((pressDuration < longPressThreshold)) {
+                // Short press (1, 2, or 3)
+                if (button == 1) { // Short press ENTER
+                    char selectedChar = valueArray[arrayIndex];
+                    if (selectedChar == '.' && decimalSet) {
+                        continue; // Skip if decimal already exists
+                    }
+                    if (selectedChar == '.') {
+                        decimalSet = true; // Mark that decimal is added
+                    }
+                    inputBuffer[currentIndex++] = selectedChar; // Store character in buffer
+                    if (currentIndex >= 9) {
+                        currentIndex = 9; // Prevent overflow
+                    }
+                    // Update row2 with the inputBuffer content and display on LCD
+                    row2 = String(inputBuffer); // Store the input in row2
+                    lcd.setCursor(0, 1); // Update row2 position
+                    lcd.print(row2); // Display inputBuffer in row2
+                } else if (button == 2) { // Short press DOWN
+                    arrayIndex = (arrayIndex + 10) % 11; // Move down in valueArray
+                } else if (button == 3) { // Short press UP
+                    arrayIndex = (arrayIndex + 1) % 11; // Move up in valueArray
+                }
+            } else {
+                // Long press (4, 5, or 6)
+                if (button == 1) { // Long press ACCEPT
+                    if (currentIndex > 0) {
+                        result = atof(inputBuffer); // Convert inputBuffer to float
+                        result = round(result * 100.0) / 100.0; // Round to 2 decimal places
+                        inputComplete = true;
+                    }
+                } else if (button == 2) { // Long press CLEAR
+                    memset(inputBuffer, 0, sizeof(inputBuffer)); // Clear buffer
+                    currentIndex = 0;
+                    decimalSet = false;
+                    lcd.clear();
+                    lcd.setCursor(0, 0);
+                    lcd.print(row1); // Redisplay the prompt from row1
+                    row1=String(prompt);
+                row2="";
+                } else if (button == 3) { // Long press RETURN
+                    lcd.clear();
+                    lcd.print("Cancelled");
+                    delay(1000);
+                    return -1; // Return -1 to indicate cancellation
+                }
+            }
+        }
+
+        // Update row1 with the current selected character (no appending, just show current selection)
+        row1 = String(prompt) + String(valueArray[arrayIndex]); // Only show current selected character
+        lcd.setCursor(0, 0); // Update row1 position
+        lcd.print(row1); // Display prompt + current character
+
+    }
+
+    return result; // Return the final value
+}
+
+
+
+
+int read_button() {
+    // First, handle the web button press, if available.
+    //server.handleClient();
+    server.handleClient();
+    if (buttonPressed != 0) {  // If a button was pressed via web
+        if(buttonPressed == 4)
+        {
+          buttonPressedLong= 4;
+        }
+        if(buttonPressed == 5)
+        {
+          buttonPressedLong= 5;
+        }
+        if(buttonPressed == 6)
+        {
+          buttonPressedLong= 6;
+        }
+       
+        int temp = buttonPressed;  // Store the button press value temporarily
+        buttonPressed = 0;  // Reset the web button after use
+        return temp;  // Return the button number from the web input
+    }
+  
+    // Handle physical button presses if no web button was pressed
+    bool enter_pressed = digitalRead(ENTER_BUTTON_PIN) == HIGH;
+    bool down_pressed = digitalRead(DOWN_BUTTON_PIN) == HIGH;
+    bool up_pressed = digitalRead(UP_BUTTON_PIN) == HIGH;
+
+    unsigned long current_time = millis();
+
+    // Handle Enter button
+    if (enter_pressed) {
+        if (enter_press_time == 0) enter_press_time = current_time;
+        if (current_time - enter_press_time >= LONG_PRESS_DURATION) {
+            call_buzzer(1, 100, 100, 1, 0);
+            return 4;  // Long press for Enter
+        }
+        return 1;  // Short press for Enter
+    } else {
+        enter_press_time = 0;
+    }
+
+    // Handle Down button
+    if (down_pressed) {
+        if (down_press_time == 0) down_press_time = current_time;
+        if (current_time - down_press_time >= LONG_PRESS_DURATION) {
+            call_buzzer(1, 100, 100, 1, 0);
+            return 5;  // Long press for Down
+        }
+        return 2;  // Short press for Down
+    } else {
+        down_press_time = 0;
+    }
+
+    // Handle Up button
+    if (up_pressed) {
+        if (up_press_time == 0) up_press_time = current_time;
+        if (current_time - up_press_time >= LONG_PRESS_DURATION) {
+            call_buzzer(1, 100, 100, 1, 0);
+            return 6;  // Long press for Up
+        }
+        return 3;  // Short press for Up
+    } else {
+        up_press_time = 0;
+    }
+
+    // Return 0 if no button is pressed (either web or physical)
+    return 0;
+}
+
+// Function to display a message in a specified section of the display
+void display(int x, int y, const char* z) {
+    if (x <= 0 || y <= 0) {
+        Serial.println("Error: Invalid number of sections or quadrant");
+        return;
+    }
+
+    int totalSections = x;               // Total sections/quadrants
+    int sectionWidth = LCD_COLUMNS / (x / 2); // Width of each section (x/2 quadrants per row)
+    int sectionHeight = LCD_ROWS / 2;    // Height of each section (always 1 row per quadrant)
+
+    if ((x % 2 != 0) || (LCD_COLUMNS % (x / 2) != 0)) {
+        Serial.println("Warning: Sections do not divide evenly. Output may be misaligned.");
+    }
+
+    // Determine the row and column for the selected section
+    int sectionIndex = y - 1;                  // Zero-based index for the section
+    int startColumn = (sectionIndex % (x / 2)) * sectionWidth; // Horizontal position
+    int startRow = (sectionIndex / (x / 2));   // Vertical position
+
+    // Check if the selected quadrant is valid
+    if (startRow >= LCD_ROWS || startColumn >= LCD_COLUMNS) {
+        Serial.println("Error: Quadrant out of range");
+        return;
+    }
+
+    // Clear the section
+    lcd.setCursor(startColumn, startRow);
+    for (int i = 0; i < sectionWidth; i++) {
+        lcd.print(" ");
+    }
+
+    // Print the message within the section
+    lcd.setCursor(startColumn, startRow);
+    lcd.print(z);
+}
+
+// Function to clear the display or a specific section
+void clear_display(int x = -1, int y = -1) {
+    if (x == -1 && y == -1) {
+        lcd.clear(); // Clear the whole display
+    } else if (x > 0 && y > 0) {
+        int totalSections = x;               // Total sections/quadrants
+        int sectionWidth = LCD_COLUMNS / (x / 2); // Width of each section
+        int sectionHeight = LCD_ROWS / 2;    // Height of each section
+
+        if ((x % 2 != 0) || (LCD_COLUMNS % (x / 2) != 0)) {
+            Serial.println("Warning: Sections do not divide evenly. Output may be misaligned.");
+        }
+
+        // Determine the row and column for the selected section
+        int sectionIndex = y - 1;                  // Zero-based index for the section
+        int startColumn = (sectionIndex % (x / 2)) * sectionWidth; // Horizontal position
+        int startRow = (sectionIndex / (x / 2));   // Vertical position
+
+        // Check if the selected quadrant is valid
+        if (startRow >= LCD_ROWS || startColumn >= LCD_COLUMNS) {
+            Serial.println("Error: Quadrant out of range");
+            return;
+        }
+
+        // Clear the section
+        lcd.setCursor(startColumn, startRow);
+        for (int i = 0; i < sectionWidth; i++) {
+            lcd.print(" ");
+        }
+    } else {
+        Serial.println("Error: Invalid arguments for clear_display");
+    }
+}
+// Function to make the buzzer beep 'beepCount' times with specified HIGH and LOW times,
+// repeated 'repeatCount' times, with 'sequenceDelay' between sequences
+void call_buzzer(int beepCount, int highTime, int lowTime, int repeatCount, int sequenceDelay) {
+    for (int r = 0; r < repeatCount; r++) {  // Repeat the sequence 'repeatCount' times
+        for (int i = 0; i < beepCount; i++) {  // Beep 'beepCount' times
+            digitalWrite(BUZZER_PIN, HIGH);  // Turn buzzer ON
+            delay(highTime);                 // Wait for HIGH time
+            digitalWrite(BUZZER_PIN, LOW);   // Turn buzzer OFF
+            delay(lowTime);                  // Wait for LOW time
+        }
+        delay(sequenceDelay);  // Wait for 'sequenceDelay' ms after each full sequence
+    }
+}
