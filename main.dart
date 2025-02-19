@@ -105,12 +105,19 @@ class _MyAppState extends State<MyApp> {
               children: [
                 StatusBulb(
                     label: "Connection",
-                    color: isConnected ? Colors.green : Colors.red),
+                    color: isConnected
+                        ? const Color.fromARGB(255, 19, 119, 23)
+                        : const Color.fromARGB(255, 248, 6, 6)),
                 StatusBulb(
                     label: "Heater",
-                    color: heaterOn ? Colors.green : Colors.red),
+                    color: heaterOn
+                        ? const Color.fromARGB(255, 19, 119, 23)
+                        : const Color.fromARGB(255, 248, 6, 6)),
                 StatusBulb(
-                    label: "Fan", color: fanOn ? Colors.green : Colors.red),
+                    label: "Fan",
+                    color: fanOn
+                        ? const Color.fromARGB(255, 19, 119, 23)
+                        : const Color.fromARGB(255, 248, 6, 6)),
               ],
             ),
             SizedBox(height: 20),
@@ -118,8 +125,9 @@ class _MyAppState extends State<MyApp> {
               width: 300,
               height: 80,
               decoration: BoxDecoration(
-                color: Colors.black,
-                border: Border.all(color: Colors.green, width: 4),
+                color: const Color.fromARGB(255, 243, 247, 2),
+                border: Border.all(
+                    color: const Color.fromARGB(255, 15, 15, 15), width: 4),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Column(
@@ -130,7 +138,7 @@ class _MyAppState extends State<MyApp> {
                     style: TextStyle(
                       fontFamily: "Courier",
                       fontSize: 20,
-                      color: Colors.green,
+                      color: const Color.fromARGB(255, 7, 7, 7),
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -139,7 +147,7 @@ class _MyAppState extends State<MyApp> {
                     style: TextStyle(
                       fontFamily: "Courier",
                       fontSize: 20,
-                      color: Colors.green,
+                      color: const Color.fromARGB(255, 7, 7, 7),
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -214,7 +222,9 @@ class StatusBulb extends StatelessWidget {
     return Column(
       children: [
         Icon(Icons.lightbulb, size: 40, color: color),
-        Text(label, style: TextStyle(fontSize: 16, color: Colors.blue)),
+        Text(label,
+            style: TextStyle(
+                fontSize: 16, color: const Color.fromARGB(255, 7, 7, 7))),
       ],
     );
   }
@@ -235,13 +245,13 @@ class ButtonCard extends StatelessWidget {
       child: Card(
         elevation: 6,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        color: Colors.green,
+        color: const Color.fromARGB(255, 14, 17, 238),
         child: Container(
           width: 80,
           height: 80,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(15),
-            color: Colors.green,
+            color: const Color.fromARGB(255, 14, 17, 238),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
