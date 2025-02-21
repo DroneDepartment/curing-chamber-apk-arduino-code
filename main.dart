@@ -254,8 +254,8 @@ class ButtonCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double buttonSize = orientation == Orientation.portrait ? 80 : 40;
-    final double iconSize = orientation == Orientation.portrait ? 30 : 15;
+    final double buttonSize = orientation == Orientation.portrait ? 60 : 40;
+    final double iconSize = orientation == Orientation.portrait ? 20 : 15;
     final double fontSize = orientation == Orientation.portrait ? 12 : 8;
 
     return GestureDetector(
