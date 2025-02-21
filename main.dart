@@ -13,7 +13,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   List<String> lcdText = ["Connecting...", ""];
-  final String esp32Ip = "http://192.168.1.117"; // Change to your ESP32 IP
+  final String esp32Ip = "http://192.168.1.102:80"; // Change to your ESP32 IP
   bool isConnected = false;
   bool heaterOn = false;
   bool fanOn = false;
@@ -97,114 +97,124 @@ class _MyAppState extends State<MyApp> {
           title: Image.asset('assets/logo.png', height: 40),
           centerTitle: true,
         ),
-        body: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        body: OrientationBuilder(
+          builder: (context, orientation) {
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                StatusBulb(
-                    label: "Connection",
-                    color: isConnected
-                        ? const Color.fromARGB(255, 19, 119, 23)
-                        : const Color.fromARGB(255, 248, 6, 6)),
-                StatusBulb(
-                    label: "Heater",
-                    color: heaterOn
-                        ? const Color.fromARGB(255, 19, 119, 23)
-                        : const Color.fromARGB(255, 248, 6, 6)),
-                StatusBulb(
-                    label: "Fan",
-                    color: fanOn
-                        ? const Color.fromARGB(255, 19, 119, 23)
-                        : const Color.fromARGB(255, 248, 6, 6)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    StatusBulb(
+                        label: "Connection",
+                        color: isConnected
+                            ? const Color.fromARGB(255, 19, 119, 23)
+                            : const Color.fromARGB(255, 248, 6, 6)),
+                    StatusBulb(
+                        label: "Heater",
+                        color: heaterOn
+                            ? const Color.fromARGB(255, 19, 119, 23)
+                            : const Color.fromARGB(255, 248, 6, 6)),
+                    StatusBulb(
+                        label: "Fan",
+                        color: fanOn
+                            ? const Color.fromARGB(255, 19, 119, 23)
+                            : const Color.fromARGB(255, 248, 6, 6)),
+                  ],
+                ),
+                SizedBox(height: 20),
+                Container(
+                  width: 300,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: const Color.fromARGB(255, 243, 247, 2),
+                    border: Border.all(
+                        color: const Color.fromARGB(255, 15, 15, 15), width: 4),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        lcdText[0],
+                        style: TextStyle(
+                          fontFamily: "Courier",
+                          fontSize: 20,
+                          color: const Color.fromARGB(255, 7, 7, 7),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      Text(
+                        lcdText[1],
+                        style: TextStyle(
+                          fontFamily: "Courier",
+                          fontSize: 20,
+                          color: const Color.fromARGB(255, 7, 7, 7),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(height: 20),
+                // Buttons Section - Updated Layout
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          ButtonCard(
+                            buttonLabel: "Enter",
+                            icon: Icons.keyboard_return,
+                            onPressed: () => sendButtonPress("Enter"),
+                            orientation: orientation,
+                          ),
+                          ButtonCard(
+                            buttonLabel: "Down",
+                            icon: Icons.arrow_downward,
+                            onPressed: () => sendButtonPress("Down"),
+                            orientation: orientation,
+                          ),
+                          ButtonCard(
+                            buttonLabel: "Up",
+                            icon: Icons.arrow_upward,
+                            onPressed: () => sendButtonPress("Up"),
+                            orientation: orientation,
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          ButtonCard(
+                            buttonLabel: "Accept",
+                            icon: Icons.check,
+                            onPressed: () => sendButtonPress("Accept"),
+                            orientation: orientation,
+                          ),
+                          ButtonCard(
+                            buttonLabel: "Clear",
+                            icon: Icons.clear,
+                            onPressed: () => sendButtonPress("Clear"),
+                            orientation: orientation,
+                          ),
+                          ButtonCard(
+                            buttonLabel: "Back",
+                            icon: Icons.arrow_back,
+                            onPressed: () => sendButtonPress("Back"),
+                            orientation: orientation,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ],
-            ),
-            SizedBox(height: 20),
-            Container(
-              width: 300,
-              height: 80,
-              decoration: BoxDecoration(
-                color: const Color.fromARGB(255, 243, 247, 2),
-                border: Border.all(
-                    color: const Color.fromARGB(255, 15, 15, 15), width: 4),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    lcdText[0],
-                    style: TextStyle(
-                      fontFamily: "Courier",
-                      fontSize: 20,
-                      color: const Color.fromARGB(255, 7, 7, 7),
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  Text(
-                    lcdText[1],
-                    style: TextStyle(
-                      fontFamily: "Courier",
-                      fontSize: 20,
-                      color: const Color.fromARGB(255, 7, 7, 7),
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(height: 20),
-            // Buttons Section - Updated Layout
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      ButtonCard(
-                        buttonLabel: "Enter",
-                        icon: Icons.keyboard_return,
-                        onPressed: () => sendButtonPress("Enter"),
-                      ),
-                      ButtonCard(
-                        buttonLabel: "Down",
-                        icon: Icons.arrow_downward,
-                        onPressed: () => sendButtonPress("Down"),
-                      ),
-                      ButtonCard(
-                        buttonLabel: "Up",
-                        icon: Icons.arrow_upward,
-                        onPressed: () => sendButtonPress("Up"),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      ButtonCard(
-                        buttonLabel: "Accept",
-                        icon: Icons.check,
-                        onPressed: () => sendButtonPress("Accept"),
-                      ),
-                      ButtonCard(
-                        buttonLabel: "Clear",
-                        icon: Icons.clear,
-                        onPressed: () => sendButtonPress("Clear"),
-                      ),
-                      ButtonCard(
-                        buttonLabel: "Back",
-                        icon: Icons.arrow_back,
-                        onPressed: () => sendButtonPress("Back"),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -234,12 +244,20 @@ class ButtonCard extends StatelessWidget {
   final String buttonLabel;
   final IconData icon;
   final VoidCallback onPressed;
+  final Orientation orientation;
 
   ButtonCard(
-      {required this.buttonLabel, required this.icon, required this.onPressed});
+      {required this.buttonLabel,
+      required this.icon,
+      required this.onPressed,
+      required this.orientation});
 
   @override
   Widget build(BuildContext context) {
+    final double buttonSize = orientation == Orientation.portrait ? 80 : 40;
+    final double iconSize = orientation == Orientation.portrait ? 30 : 15;
+    final double fontSize = orientation == Orientation.portrait ? 12 : 8;
+
     return GestureDetector(
       onTap: onPressed,
       child: Card(
@@ -247,8 +265,8 @@ class ButtonCard extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         color: const Color.fromARGB(255, 14, 17, 238),
         child: Container(
-          width: 80,
-          height: 80,
+          width: buttonSize,
+          height: buttonSize,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(15),
             color: const Color.fromARGB(255, 14, 17, 238),
@@ -256,11 +274,11 @@ class ButtonCard extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 30, color: Colors.white),
+              Icon(icon, size: iconSize, color: Colors.white),
               SizedBox(height: 8),
               Text(
                 buttonLabel,
-                style: TextStyle(color: Colors.white, fontSize: 12),
+                style: TextStyle(color: Colors.white, fontSize: fontSize),
                 textAlign: TextAlign.center,
               ),
             ],
