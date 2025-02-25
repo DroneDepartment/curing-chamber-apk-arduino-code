@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'dart:async';
+import 'dart:io'; // For NetworkInterface
 
 void main() {
   runApp(MyApp());
@@ -13,15 +15,66 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   List<String> lcdText = ["Connecting...", ""];
-  final String esp32Ip = "http://192.168.1.102:80"; // Change to your ESP32 IP
+  final String esp32Ip =
+      "http://192.168.1.159:8000"; // Use the Zerotier IP of your PC
   bool isConnected = false;
   bool heaterOn = false;
   bool fanOn = false;
+  bool isZeroTierConnected = false;
 
   @override
   void initState() {
     super.initState();
+    checkZeroTierStatus(); // Check ZeroTier connection
+    Timer.periodic(Duration(seconds: 5), (timer) => checkZeroTierStatus());
     Timer.periodic(Duration(seconds: 2), (timer) => fetchLcdText());
+  }
+
+  Future<String?> getZeroTierIpAddress() async {
+    try {
+      // Get all network interfaces
+      final interfaces = await NetworkInterface.list();
+
+      // Print all interfaces and their IP addresses for debugging
+      for (var interface in interfaces) {
+        print('Interface: ${interface.name}');
+        for (var address in interface.addresses) {
+          print('IP: ${address.address}');
+        }
+      }
+
+      // Loop through interfaces to find the ZeroTier IP address
+      for (var interface in interfaces) {
+        // Check if the interface name contains "zt" (common for ZeroTier)
+        if (interface.name.contains('tun0')) {
+          // Return the first IP address of the ZeroTier interface
+          if (interface.addresses.isNotEmpty) {
+            return interface.addresses.first.address;
+          }
+        }
+      }
+
+      // If no ZeroTier interface is found, return null
+      return null;
+    } catch (e) {
+      print('Error getting ZeroTier IP: $e');
+      return null;
+    }
+  }
+
+  Future<void> checkZeroTierStatus() async {
+    final zeroTierIp = await getZeroTierIpAddress();
+    if (zeroTierIp != null) {
+      print('ZeroTier IP Address: $zeroTierIp');
+      setState(() {
+        isZeroTierConnected = true;
+      });
+    } else {
+      print('ZeroTier IP Address not found');
+      setState(() {
+        isZeroTierConnected = false;
+      });
+    }
   }
 
   Future<void> fetchLcdText() async {
@@ -118,6 +171,11 @@ class _MyAppState extends State<MyApp> {
                     StatusBulb(
                         label: "Fan",
                         color: fanOn
+                            ? const Color.fromARGB(255, 19, 119, 23)
+                            : const Color.fromARGB(255, 248, 6, 6)),
+                    StatusBulb(
+                        label: "ZeroTier",
+                        color: isZeroTierConnected
                             ? const Color.fromARGB(255, 19, 119, 23)
                             : const Color.fromARGB(255, 248, 6, 6)),
                   ],
