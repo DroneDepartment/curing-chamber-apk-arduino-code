@@ -476,6 +476,10 @@ void controlTemperature(float maxTemp, int riseTime, int holdTime, int fallTime)
   unsigned long lastDisplayUpdate = 0;
   bool isPaused = false;
 
+  bool lastHeaterOn = false;
+ unsigned long lastTuningMillis = 0;
+ const unsigned long tuningInterval = 3000;  // Tune every 3 seconds if toggled
+
 
 
   while (!read_temperature_non_blocking()) {
@@ -686,9 +690,7 @@ lcd.clear();
         break;
     }
 
-bool lastHeaterOn = false;
-unsigned long lastTuningMillis = 0;
-const unsigned long tuningInterval = 3000;  // Tune every 3 seconds if toggled
+
 
 if (read_temperature_non_blocking()) {
   float currentTemp = results[0];
