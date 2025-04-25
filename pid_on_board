@@ -1142,7 +1142,7 @@ void showMenu2()
         else if (selectedItem == 4)
         { // Fall Time
           //fallTime = read_value("Fall Time:");
-          alpha=read_value("hystersis: ");
+          hysteresis=read_value("hysteresis: ");
           saveToEEPROM();
           updateMenuDisplay2(4); // Refresh the Fall Time menu item
         }
