@@ -17,9 +17,11 @@
 #define KI_ADDR 110
 #define KD_ADDR 120
 #define alpha_ADDR 130
+#define hysteresis_ADDR 140
 
 float Kp = 0.0, Ki = 0.0, Kd = 0.0, alpha = 0.0;
 float integral = 0.0, output = 0.0, derivative = 0.0, lasterror = 0.0, feedforward = 0.0;
+float hysteresis = 0.1; // Adjust this value
 unsigned long lastTime = 0;
 
 const char *ssid = "OpenWrt_2G";
@@ -776,13 +778,13 @@ void controlTemperature(float maxTemp, int riseTime, int holdTime, int fallTime)
   output = constrain(output, 0, 1);
 
   // Use output to control the heater (binary on/off decision)
-  if (output > 0.5 && !heaterOn) // You can tune this threshold
+  if (output > (0.5 + hysteresis) && !heaterOn) // You can tune this threshold
   {
     digitalWrite(heaterPin, HIGH);
     call_heater_web(1);
     heaterOn = true;
   }
-  else if (output <= 0.5 && heaterOn)
+  else if (output <= (0.5 - hysteresis) && heaterOn)
   {
     digitalWrite(heaterPin, LOW);
     call_heater_web(0);
@@ -813,14 +815,14 @@ void controlTemperature(float maxTemp, int riseTime, int holdTime, int fallTime)
 
       lcd.setCursor(0, 0);
       //lcd.print("T1=");
-      lcd.print((int)results[0]);
+      lcd.print((float)results[0]);
       lcd.print((char)0xDF);
       lcd.print("C ");
 
       row1 = String((float)results[0]) + "DC ";
 
       lcd.setCursor(8, 0);
-      lcd.print("T2=");
+      //lcd.print("T2=");
       lcd.print(targetTemp);
       lcd.print((char)0xDF);
       lcd.print("C");
@@ -1095,14 +1097,14 @@ void showMenu2()
       if (button == 2)
       { // DOWN button pressed
         // Move to the next item
-        selectedItem = (selectedItem + 1) % (menuSize-1);
+        selectedItem = (selectedItem + 1) % (menuSize);
         currentSelection2 = selectedItem; // Update the current selection
         updateMenuDisplay2(selectedItem); // Refresh the menu display
       }
       else if (button == 3)
       { // UP button pressed
         // Move to the previous item
-        selectedItem = (selectedItem - 1 + (menuSize-1)) % (menuSize-1);
+        selectedItem = (selectedItem - 1 + (menuSize)) % (menuSize);
         currentSelection2 = selectedItem; // Update the current selection
         updateMenuDisplay2(selectedItem); // Refresh the menu display
       }
@@ -1138,6 +1140,14 @@ void showMenu2()
           updateMenuDisplay2(3); // Refresh the Fall Time menu item
         }
         else if (selectedItem == 4)
+        { // Fall Time
+          //fallTime = read_value("Fall Time:");
+          alpha=read_value("hystersis: ");
+          saveToEEPROM();
+          updateMenuDisplay2(4); // Refresh the Fall Time menu item
+        }
+
+        else if (selectedItem == 5)
         { // Return
           lcd.clear();
           row1 = "";
@@ -1306,6 +1316,17 @@ int displayCuringParameters(float finalTemp, int riseTime, int holdTime, int fal
         break;
       
       case 8:
+        lcd.clear();
+        row1 = "";
+        row2 = "";
+        lcd.print("hysteresis = ");
+        row1 = "hysteresis =";
+        lcd.setCursor(0, 1);
+        row2 = String(hysteresis) ;
+        lcd.print(hysteresis);
+        break;
+      
+      case 9:
         row1 = "Press Accept to";
         lcd.print("Press Accept to");
 
@@ -1316,7 +1337,7 @@ int displayCuringParameters(float finalTemp, int riseTime, int holdTime, int fal
       }
 
       // Increment the message index and loop back to 0 if it exceeds 4
-      messageIndex = (messageIndex + 1) % 9;
+      messageIndex = (messageIndex + 1) % 10;
     }
 
     // Check the button state
@@ -1383,11 +1404,13 @@ void saveToEEPROM()
   EEPROM.put(HOLD_ADDR, holdTime);  // Save holdTime
   EEPROM.put(FALL_ADDR, fallTime);  // Save fallTime
 
+
   // pid
   EEPROM.put(KP_ADDR, Kp);
   EEPROM.put(KI_ADDR, Ki);
   EEPROM.put(KD_ADDR, Kd);
   EEPROM.put(alpha_ADDR,alpha);
+  EEPROM.put(hysteresis_ADDR, hysteresis);  // Save fallTime
 
   EEPROM.commit(); // Commit changes to EEPROM
   Serial.println("Data saved to EEPROM");
@@ -1406,6 +1429,8 @@ void loadFromEEPROM()
   EEPROM.get(KI_ADDR, Ki);
   EEPROM.get(KD_ADDR, Kd);
   EEPROM.get(alpha_ADDR,alpha);
+  EEPROM.get(hysteresis_ADDR, hysteresis);
+  
 
   Serial.println("Data loaded from EEPROM");
 }
@@ -1499,11 +1524,12 @@ void updateMenuDisplay2(int selectedItem)
   char KiBuffer[10];
   char KdBuffer[10];
   char alphaBuffer[10];
+  char hysteresisBuffer[10];
 
   // Loop through the menu items and store the content in row1 and row2
   for (int i = 0; i < itemsPerRow; i++)
   {
-    int menuIndex = (i + (currentSelection2 / itemsPerRow) * itemsPerRow) % (menuSize-1);
+    int menuIndex = (i + (currentSelection2 / itemsPerRow) * itemsPerRow) % (menuSize);
 
     // Prepare the line content
     String line = (menuIndex == selectedItem) ? ">" : " "; // Show ">" for selection
@@ -1540,6 +1566,11 @@ void updateMenuDisplay2(int selectedItem)
     }
     else if (menuIndex == 4)
     {
+      dtostrf(hysteresis, 6, 2, hysteresisBuffer); // Convert float to properly formatted string
+      line += "4.hysteresis  " + String(hysteresisBuffer) ;
+    }
+    else if (menuIndex == 5)
+    {
       line += "5.save & return";
     }
     
@@ -1554,7 +1585,7 @@ void updateMenuDisplay2(int selectedItem)
   // Now, use your existing LCD printing mechanism
   for (int i = 0; i < itemsPerRow; i++)
   {
-    int menuIndex = (i + (currentSelection2 / itemsPerRow) * itemsPerRow) % (menuSize-1);
+    int menuIndex = (i + (currentSelection2 / itemsPerRow) * itemsPerRow) % (menuSize);
 
     lcd.setCursor(0, i); // Set cursor to row
     if (menuIndex == selectedItem)
