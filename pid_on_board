@@ -24,6 +24,12 @@ float integral = 0.0, output = 0.0, derivative = 0.0, lasterror = 0.0, feedforwa
 float hysteresis = 0.1; // Adjust this value
 unsigned long lastTime = 0;
 
+char KpBuffer[10]; // Buffer to store the formatted temperature
+char KiBuffer[10];
+char KdBuffer[10];
+char alphaBuffer[10];
+char hysteresisBuffer[10];
+
 const char *ssid = "OpenWrt_2G";
 const char *password = "43580729";
 // const char* ssid = "abcd";
@@ -61,8 +67,8 @@ unsigned long lastRequestTime = 0;        // To track the time of the last tempe
 const unsigned long conversionTime = 750; // DS18B20 max conversion time (12-bit resolution)
 
 // Variables for menu navigation
-int currentSelection = 0; 
-int currentSelection2 = 0;               // Tracks the current selected menu item
+int currentSelection = 0;
+int currentSelection2 = 0; // Tracks the current selected menu item
 
 unsigned long lastButtonPressTime = 0;   // Time of last button press
 const unsigned long debounceDelay = 200; // Debounce delay for buttons
@@ -75,7 +81,6 @@ const char *menuItems[] = {
     "4.Fall Tym 000m",
     "5.Return",
     "6.Continue"};
-
 
 //***********************here*******************
 unsigned long clientHandleStartTime = 0; // Variable to store the start time of handleClient
@@ -259,8 +264,8 @@ void sendLcdContent()
 void setup()
 {
   Serial.begin(9600); // Start serial communication
-  //saveToEEPROM();    // Save data to EEPROM
-  //delay(1000);
+  // saveToEEPROM();    // Save data to EEPROM
+  // delay(1000);
   loadFromEEPROM(); // Load data to verify
   Wire.begin();
   lcd.init();
@@ -289,8 +294,8 @@ void loop()
   // server.handleClient();
   const char *state1_options[] = {"CURING CHAMBER", "PRESS ENTER"};
   // Serial.print("i am here ");
-  const char *state2_options[] = {"1.START CURING", "2.SHOW TEMP", "3.PID TUNING" , "4.RETURN"};
-                                                                   
+  const char *state2_options[] = {"1.START CURING", "2.SHOW TEMP", "3.PID TUNING", "4.RETURN"};
+
   const char *state3_1_options[] = {"1.STANDARD", "2.CUSTOM", "3.RETURN"};
   // const char* state
 
@@ -494,7 +499,7 @@ void loop()
           row1 = "";
           row2 = "";
           row1 = "pid tuning..";
-          //loadFromEEPROM();
+          // loadFromEEPROM();
           lcd.print("pid tuning..");
           // Start the timer to handle server for 1 second
           clientHandleStartTime = millis();
@@ -505,7 +510,6 @@ void loop()
             server.handleClient(); // Handle client
           }
           showMenu2();
-
         }
 
         else if (state2_reply == 4)
@@ -519,8 +523,6 @@ void loop()
 
 void controlTemperature(float maxTemp, int riseTime, int holdTime, int fallTime)
 {
-
-  
 
   enum State
   {
@@ -757,64 +759,63 @@ void controlTemperature(float maxTemp, int riseTime, int holdTime, int fallTime)
     }
 
     if (read_temperature_non_blocking())
-{
-  unsigned long now = millis();
-  float currentTemp = results[0];
-  float error = targetTemp - currentTemp;
-  float deltaTime = (now - lastTime) / 1000.0; // convert ms to seconds
-  lastTime = now;
+    {
+      unsigned long now = millis();
+      float currentTemp = results[0];
+      float error = targetTemp - currentTemp;
+      float deltaTime = (now - lastTime) / 1000.0; // convert ms to seconds
+      lastTime = now;
 
-  integral += error * deltaTime;
-  derivative = (error - lasterror) / deltaTime;
-  lasterror = error;
+      integral += error * deltaTime;
+      derivative = (error - lasterror) / deltaTime;
+      lasterror = error;
 
-  // Optional feedforward term
-  feedforward = alpha * (targetTemp - currentTemp);
+      // Optional feedforward term
+      feedforward = alpha * (targetTemp - currentTemp);
 
-  // PID output
-  output = (Kp * error) + (Ki * integral) - (Kd * derivative) + feedforward;
+      // PID output
+      output = (Kp * error) + (Ki * integral) - (Kd * derivative) + feedforward;
 
-  // Clamp the output if necessary (e.g., 0–255 for PWM or 0–1 for boolean control)
-  output = constrain(output, 0, 1);
+      // Clamp the output if necessary (e.g., 0–255 for PWM or 0–1 for boolean control)
+      output = constrain(output, 0, 1);
 
-  // Use output to control the heater (binary on/off decision)
-  if (output > (0.5 + hysteresis) && !heaterOn) // You can tune this threshold
-  {
-    digitalWrite(heaterPin, HIGH);
-    call_heater_web(1);
-    heaterOn = true;
-  }
-  else if (output <= (0.5 - hysteresis) && heaterOn)
-  {
-    digitalWrite(heaterPin, LOW);
-    call_heater_web(0);
-    heaterOn = false;
-  }
+      // Use output to control the heater (binary on/off decision)
+      if (output > (0.5 + hysteresis) && !heaterOn) // You can tune this threshold
+      {
+        digitalWrite(heaterPin, HIGH);
+        call_heater_web(1);
+        heaterOn = true;
+      }
+      else if (output <= (0.5 - hysteresis) && heaterOn)
+      {
+        digitalWrite(heaterPin, LOW);
+        call_heater_web(0);
+        heaterOn = false;
+      }
 
-  // Optional: fallback simple temp tolerance window
-  /*
-  if (currentTemp < targetTemp - tempTolerance && !heaterOn)
-  {
-    digitalWrite(heaterPin, HIGH);
-    call_heater_web(1);
-    heaterOn = true;
-  }
-  else if (currentTemp > targetTemp + tempTolerance && heaterOn)
-  {
-    digitalWrite(heaterPin, LOW);
-    call_heater_web(0);
-    heaterOn = false;
-  }
-  */
-}
-
+      // Optional: fallback simple temp tolerance window
+      /*
+      if (currentTemp < targetTemp - tempTolerance && !heaterOn)
+      {
+        digitalWrite(heaterPin, HIGH);
+        call_heater_web(1);
+        heaterOn = true;
+      }
+      else if (currentTemp > targetTemp + tempTolerance && heaterOn)
+      {
+        digitalWrite(heaterPin, LOW);
+        call_heater_web(0);
+        heaterOn = false;
+      }
+      */
+    }
 
     if (millis() - lastDisplayUpdate >= 250)
     {
       lastDisplayUpdate = millis();
 
       lcd.setCursor(0, 0);
-      //lcd.print("T1=");
+      // lcd.print("T1=");
       lcd.print((float)results[0]);
       lcd.print((char)0xDF);
       lcd.print("C ");
@@ -822,7 +823,7 @@ void controlTemperature(float maxTemp, int riseTime, int holdTime, int fallTime)
       row1 = String((float)results[0]) + "DC ";
 
       lcd.setCursor(8, 0);
-      //lcd.print("T2=");
+      // lcd.print("T2=");
       lcd.print(targetTemp);
       lcd.print((char)0xDF);
       lcd.print("C");
@@ -1069,15 +1070,15 @@ void showMenu()
   }
 }
 
-//for pid constants input 
+// for pid constants input
 
 void showMenu2()
 {
-  lcd.begin(16, 2);                       // Initialize LCD display
-  lcd.clear();                            // Clear LCD
-  //lcd.createChar(0, degreeSymbol);        // Create custom degree symbol
+  lcd.begin(16, 2); // Initialize LCD display
+  lcd.clear();      // Clear LCD
+  // lcd.createChar(0, degreeSymbol);        // Create custom degree symbol
   unsigned long currentMillis = millis(); // Track time for debouncing
-  int selectedItem = currentSelection2;    // Start with the current selected item
+  int selectedItem = currentSelection2;   // Start with the current selected item
 
   // Display the menu items
   updateMenuDisplay2(selectedItem);
@@ -1113,36 +1114,36 @@ void showMenu2()
         // Action based on selected menu item
         if (selectedItem == 0)
         { // Temp
-          //tempValue = read_value("Enter Temp:");
-          Kp=read_value("Kp: ");
+          // tempValue = read_value("Enter Temp:");
+          Kp = read_value("Kp: ");
           saveToEEPROM();
           updateMenuDisplay2(0); // Refresh the Temp menu item
         }
         else if (selectedItem == 1)
         { // Rise Time
-          //riseTime = read_value("Rise Time:");
-          Ki=read_value("Ki: ");
+          // riseTime = read_value("Rise Time:");
+          Ki = read_value("Ki: ");
           saveToEEPROM();
           updateMenuDisplay2(1); // Refresh the Rise Time menu item
         }
         else if (selectedItem == 2)
         { // Hold Time
-          //holdTime = read_value("Hold Time:");
-          Kd=read_value("Kd: ");
+          // holdTime = read_value("Hold Time:");
+          Kd = read_value("Kd: ");
           saveToEEPROM();
           updateMenuDisplay2(2); // Refresh the Hold Time menu item
         }
         else if (selectedItem == 3)
         { // Fall Time
-          //fallTime = read_value("Fall Time:");
-          alpha=read_value("alpha: ");
+          // fallTime = read_value("Fall Time:");
+          alpha = read_value("alpha: ");
           saveToEEPROM();
           updateMenuDisplay2(3); // Refresh the Fall Time menu item
         }
         else if (selectedItem == 4)
         { // Fall Time
-          //fallTime = read_value("Fall Time:");
-          hysteresis=read_value("hysteresis: ");
+          // fallTime = read_value("Fall Time:");
+          hysteresis = read_value("hysteresis: ");
           saveToEEPROM();
           updateMenuDisplay2(4); // Refresh the Fall Time menu item
         }
@@ -1166,7 +1167,6 @@ void showMenu2()
 
           break; // Exit the menu loop
         }
-        
       }
     }
   }
@@ -1269,7 +1269,6 @@ int displayCuringParameters(float finalTemp, int riseTime, int holdTime, int fal
         }
         break;
 
-      
       //}
       case 4:
         lcd.clear();
@@ -1278,10 +1277,14 @@ int displayCuringParameters(float finalTemp, int riseTime, int holdTime, int fal
         lcd.print("Kp = ");
         row1 = "Kp =";
         lcd.setCursor(0, 1);
-        row2 = String(Kp) ;
-        lcd.print(Kp);
+        // row2 = String(Kp) ;
+        // lcd.print(Kp);
+        //  Convert Kp to string with 3 decimal places
+        dtostrf(Kp, 6, 5, KpBuffer);
+        row2 = String(KpBuffer); // Use the string with 3 decimal places
+        lcd.print(KpBuffer);     // Display the value
         break;
-        
+
       case 5:
         lcd.clear();
         row1 = "";
@@ -1289,8 +1292,9 @@ int displayCuringParameters(float finalTemp, int riseTime, int holdTime, int fal
         lcd.print("Ki = ");
         row1 = "Ki =";
         lcd.setCursor(0, 1);
-        row2 = String(Ki) ;
-        lcd.print(Ki);
+        dtostrf(Ki, 6, 5, KiBuffer);
+        row2 = String(KiBuffer); // Use the string with 3 decimal places
+        lcd.print(KiBuffer);     // Display the value
         break;
 
       case 6:
@@ -1300,8 +1304,9 @@ int displayCuringParameters(float finalTemp, int riseTime, int holdTime, int fal
         lcd.print("Kd = ");
         row1 = "Kd =";
         lcd.setCursor(0, 1);
-        row2 = String(Kd) ;
-        lcd.print(Kd);
+        dtostrf(Kd, 6, 5, KdBuffer);
+        row2 = String(KdBuffer); // Use the string with 3 decimal places
+        lcd.print(KdBuffer);     // Display the value
         break;
 
       case 7:
@@ -1311,10 +1316,11 @@ int displayCuringParameters(float finalTemp, int riseTime, int holdTime, int fal
         lcd.print("alpha = ");
         row1 = "alpha =";
         lcd.setCursor(0, 1);
-        row2 = String(alpha) ;
-        lcd.print(alpha);
+        dtostrf(alpha, 6, 5, alphaBuffer);
+        row2 = String(alphaBuffer); // Use the string with 3 decimal places
+        lcd.print(alphaBuffer);     // Display the value
         break;
-      
+
       case 8:
         lcd.clear();
         row1 = "";
@@ -1322,10 +1328,11 @@ int displayCuringParameters(float finalTemp, int riseTime, int holdTime, int fal
         lcd.print("hysteresis = ");
         row1 = "hysteresis =";
         lcd.setCursor(0, 1);
-        row2 = String(hysteresis) ;
-        lcd.print(hysteresis);
+        dtostrf(hysteresis, 6, 5, hysteresisBuffer);
+        row2 = String(hysteresisBuffer); // Use the string with 3 decimal places
+        lcd.print(hysteresisBuffer);     // Display the value
         break;
-      
+
       case 9:
         row1 = "Press Accept to";
         lcd.print("Press Accept to");
@@ -1333,7 +1340,7 @@ int displayCuringParameters(float finalTemp, int riseTime, int holdTime, int fal
         lcd.setCursor(0, 1);
         row2 = "confirm";
         lcd.print("Confirm");
-        break; 
+        break;
       }
 
       // Increment the message index and loop back to 0 if it exceeds 4
@@ -1404,13 +1411,12 @@ void saveToEEPROM()
   EEPROM.put(HOLD_ADDR, holdTime);  // Save holdTime
   EEPROM.put(FALL_ADDR, fallTime);  // Save fallTime
 
-
   // pid
   EEPROM.put(KP_ADDR, Kp);
   EEPROM.put(KI_ADDR, Ki);
   EEPROM.put(KD_ADDR, Kd);
-  EEPROM.put(alpha_ADDR,alpha);
-  EEPROM.put(hysteresis_ADDR, hysteresis);  // Save fallTime
+  EEPROM.put(alpha_ADDR, alpha);
+  EEPROM.put(hysteresis_ADDR, hysteresis); // Save fallTime
 
   EEPROM.commit(); // Commit changes to EEPROM
   Serial.println("Data saved to EEPROM");
@@ -1428,9 +1434,8 @@ void loadFromEEPROM()
   EEPROM.get(KP_ADDR, Kp);
   EEPROM.get(KI_ADDR, Ki);
   EEPROM.get(KD_ADDR, Kd);
-  EEPROM.get(alpha_ADDR,alpha);
+  EEPROM.get(alpha_ADDR, alpha);
   EEPROM.get(hysteresis_ADDR, hysteresis);
-  
 
   Serial.println("Data loaded from EEPROM");
 }
@@ -1520,12 +1525,6 @@ void updateMenuDisplay2(int selectedItem)
 {
   lcd.clear(); // Clear the LCD screen
 
-  char KpBuffer[10]; // Buffer to store the formatted temperature
-  char KiBuffer[10];
-  char KdBuffer[10];
-  char alphaBuffer[10];
-  char hysteresisBuffer[10];
-
   // Loop through the menu items and store the content in row1 and row2
   for (int i = 0; i < itemsPerRow; i++)
   {
@@ -1537,44 +1536,43 @@ void updateMenuDisplay2(int selectedItem)
     // Append the menu item
     if (menuIndex == 0)
     {
-      //dtostrf(tempValue, 6, 2, tempBuffer); // Convert float to properly formatted string
-      dtostrf(Kp, 6, 2, KpBuffer); // Convert float to properly formatted string
-      //dtostrf(Ki, 6, 2, KiBuffer); // Convert float to properly formatted string
-      //dtostrf(Kd, 6, 2, KdBuffer); // Convert float to properly formatted string
-      //dtostrf(alpha, 6, 2, alphaBuffer); // Convert float to properly formatted string
+      // dtostrf(tempValue, 6, 2, tempBuffer); // Convert float to properly formatted string
+      dtostrf(Kp, 6, 5, KpBuffer); // Convert float to properly formatted string
+      // dtostrf(Ki, 6, 2, KiBuffer); // Convert float to properly formatted string
+      // dtostrf(Kd, 6, 2, KdBuffer); // Convert float to properly formatted string
+      // dtostrf(alpha, 6, 2, alphaBuffer); // Convert float to properly formatted string
 
       line += "1.Kp ";
       line += String(KpBuffer); // Append temperature value
 
-      //line += "D"; // Temporarily store "D" for degree symbol replacement
-      //line += "C"; // Celsius
+      // line += "D"; // Temporarily store "D" for degree symbol replacement
+      // line += "C"; // Celsius
     }
     else if (menuIndex == 1)
     {
-      dtostrf(Ki, 6, 2, KiBuffer); // Convert float to properly formatted string
-      line += "2.Ki  " + String(KiBuffer) ;
+      dtostrf(Ki, 6, 5, KiBuffer); // Convert float to properly formatted string
+      line += "2.Ki  " + String(KiBuffer);
     }
     else if (menuIndex == 2)
     {
-      dtostrf(Kd, 6, 2, KdBuffer); // Convert float to properly formatted string
-      line += "3.Kd  " + String(KdBuffer) ;
+      dtostrf(Kd, 6, 5, KdBuffer); // Convert float to properly formatted string
+      line += "3.Kd  " + String(KdBuffer);
     }
     else if (menuIndex == 3)
     {
-      dtostrf(alpha, 6, 2, alphaBuffer); // Convert float to properly formatted string
-      line += "4.alpha  " + String(alphaBuffer) ;
+      dtostrf(alpha, 6, 5, alphaBuffer); // Convert float to properly formatted string
+      line += "4.alpha  " + String(alphaBuffer);
     }
     else if (menuIndex == 4)
     {
-      dtostrf(hysteresis, 6, 2, hysteresisBuffer); // Convert float to properly formatted string
-      line += "4.hysteresis  " + String(hysteresisBuffer) ;
+      dtostrf(hysteresis, 6, 5, hysteresisBuffer); // Convert float to properly formatted string
+      line += "4.hysteresis  " + String(hysteresisBuffer);
     }
     else if (menuIndex == 5)
     {
       line += "5.save & return";
     }
-    
-    
+
     // Store the line content
     if (i == 0)
       row1 = line;
@@ -1600,8 +1598,7 @@ void updateMenuDisplay2(int selectedItem)
     // Print the stored row1 and row2 values but manually replace "D" with the degree symbol
     String row = (i == 0) ? row1 : row2;
     lcd.print(row);
-
-  } 
+  }
 }
 
 // System failure handling
@@ -1890,8 +1887,8 @@ float read_value(const char *prompt)
         buttonPressedLong = 0;
         if (currentIndex > 0)
         {
-          result = atof(inputBuffer);             // Convert inputBuffer to float
-          result = round(result * 100.0) / 100.0; // Round to 2 decimal places
+          result = atof(inputBuffer);               // Convert inputBuffer to float
+          result = round(result * 5000.0) / 5000.0; // Round to 3 decimal places
           inputComplete = true;
         }
       }
@@ -1956,8 +1953,8 @@ float read_value(const char *prompt)
         { // Long press ACCEPT
           if (currentIndex > 0)
           {
-            result = atof(inputBuffer);             // Convert inputBuffer to float
-            result = round(result * 100.0) / 100.0; // Round to 2 decimal places
+            result = atof(inputBuffer);               // Convert inputBuffer to float
+            result = round(result * 5000.0) / 5000.0; // Round to 3 decimal places
             inputComplete = true;
           }
         }
