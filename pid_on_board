@@ -1888,7 +1888,7 @@ float read_value(const char *prompt)
         if (currentIndex > 0)
         {
           result = atof(inputBuffer);               // Convert inputBuffer to float
-          result = round(result * 5000.0) / 5000.0; // Round to 3 decimal places
+          result = round(result * 100000.0) / 100000.0; // Round to 3 decimal places
           inputComplete = true;
         }
       }
@@ -1954,7 +1954,7 @@ float read_value(const char *prompt)
           if (currentIndex > 0)
           {
             result = atof(inputBuffer);               // Convert inputBuffer to float
-            result = round(result * 5000.0) / 5000.0; // Round to 3 decimal places
+            result = round(result * 100000.0) / 100000.0; // Round to 3 decimal places
             inputComplete = true;
           }
         }
