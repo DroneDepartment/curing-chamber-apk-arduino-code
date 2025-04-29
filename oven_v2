@@ -23,7 +23,7 @@
 
 //max31865
 // Use software SPI: CS, DI, DO, CLK
-Adafruit_MAX31865 thermo = Adafruit_MAX31865(13, 12, 14, 27);
+Adafruit_MAX31865 thermo = Adafruit_MAX31865(13, 26, 14, 27);
 // use hardware SPI, just pass in the CS pin
 //Adafruit_MAX31865 thermo = Adafruit_MAX31865(10);
 
@@ -285,6 +285,7 @@ void setup()
   lcd.init();
   lcd.backlight();
   //max31865
+  delay(1000);
   thermo.begin(MAX31865_3WIRE);  // set to 2WIRE or 4WIRE as necessary
 
   setupWiFi();
@@ -1660,7 +1661,7 @@ bool read_temperature_non_blocking()
     results[0]=thermo.temperature(RNOMINAL, RREF)+0.8;
     Serial.println(results[1]);
     Serial.println(results[0]);
-    if(results[0]<0 && results[0]>200)
+    if(results[0]<0 || results[0]>200)
     {
       Serial.println("Error: Unable to read from one or both sensors.");
         system_failure();
